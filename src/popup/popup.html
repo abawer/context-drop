@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Context Drop</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="top">
+      <img src="../../icons/icon32.png" alt="" width="30" height="30" />
+      <div class="titles">
+        <h1>Context Drop</h1>
+        <p>Start a chat with your context attached.</p>
+      </div>
+    </header>
+
+    <main>
+      <section class="block">
+        <div class="block-head">
+          <h2>Context</h2>
+          <button id="manage" class="link" type="button">Manage</button>
+        </div>
+        <div id="list" class="list" role="group" aria-label="Saved contexts"></div>
+        <button id="add" class="ghost small" type="button">+ Add context</button>
+      </section>
+
+      <section class="actions">
+        <button id="open-primary" class="primary" type="button">
+          <span>Open in Gemini</span>
+          <span class="arrow" aria-hidden="true">↗</span>
+        </button>
+        <div class="secondary-row">
+          <button id="open-alt1" class="secondary" type="button">AI Studio</button>
+          <button id="open-alt2" class="secondary" type="button">Google AI Mode</button>
+        </div>
+        <button id="attach-current" class="ghost" type="button">Attach to current tab</button>
+        <p id="hint" class="hint"></p>
+      </section>
+    </main>
+
+    <div id="status" class="status" hidden></div>
+
+    <footer class="bottom">
+      <label class="toggle">
+        <input id="fallback" type="checkbox" />
+        <span>Use text if the file cannot be attached</span>
+      </label>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

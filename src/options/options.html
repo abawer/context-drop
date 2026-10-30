@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Context Drop – Settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <header class="page-head">
+      <div class="brand">
+        <img src="../../icons/icon48.png" alt="" width="40" height="40" />
+        <div>
+          <h1>Context Drop</h1>
+          <p>Your reference files and notes, one click away from Gemini and AI Studio.</p>
+        </div>
+      </div>
+      <span class="version" id="version"></span>
+    </header>
+
+    <main class="layout">
+      <section class="column" aria-labelledby="library-title">
+        <div class="section-head">
+          <h2 id="library-title">Context library</h2>
+          <span class="count" id="count"></span>
+        </div>
+
+        <div class="card add-card">
+          <div class="dropzone" id="dropzone" tabindex="0" role="button">
+            <div class="dz-icon" aria-hidden="true">↑</div>
+            <div class="dz-text">
+              <strong>Drop a file here</strong>
+              <span>or click to choose — PDF, DOCX, TXT, MD, CSV, JSON, images…</span>
+            </div>
+            <input id="file-input" type="file" multiple hidden />
+          </div>
+
+          <details class="paste">
+            <summary>Or paste text instead</summary>
+            <div class="paste-body">
+              <label class="field">
+                <span>Name</span>
+                <input id="text-name" type="text" placeholder="Product notes" maxlength="120" />
+              </label>
+              <label class="field">
+                <span>Text</span>
+                <textarea id="text-body" rows="6" placeholder="Paste the context you want attached to your chats…"></textarea>
+              </label>
+              <button id="save-text" class="btn primary" type="button">Save text context</button>
+            </div>
+          </details>
+        </div>
+
+        <div id="contexts" class="contexts"></div>
+      </section>
+
+      <section class="column narrow" aria-labelledby="settings-title">
+        <div class="section-head">
+          <h2 id="settings-title">Settings</h2>
+        </div>
+
+        <div class="card settings-card">
+          <label class="field">
+            <span>Default destination</span>
+            <select id="default-site">
+              <option value="gemini">Gemini</option>
+              <option value="aistudio">AI Studio</option>
+              <option value="aimode">Google AI Mode</option>
+            </select>
+          </label>
+
+          <label class="switch">
+            <input id="fallback" type="checkbox" />
+            <span>
+              <strong>Fall back to text</strong>
+              <small>If the file cannot be attached, paste its text into the prompt instead.</small>
+            </span>
+          </label>
+
+          <label class="switch">
+            <input id="auto-attach" type="checkbox" />
+            <span>
+              <strong>Auto-attach when a chat opens</strong>
+              <small>Automatically attach all saved contexts on Gemini, AI Studio, or AI Mode.</small>
+            </span>
+          </label>
+
+          <label class="field">
+            <span>Text prefix</span>
+            <input id="text-prefix" type="text" maxlength="200" />
+            <small>Added before the text when the fallback is used.</small>
+          </label>
+
+          <label class="switch">
+            <input id="floating" type="checkbox" />
+            <span>
+              <strong>Floating button in Google AI</strong>
+              <small>Shows a “Context” pill on Gemini and AI Studio pages.</small>
+            </span>
+          </label>
+
+          <label class="field">
+            <span>Wait for page (seconds)</span>
+            <input id="timeout" type="number" min="5" max="60" step="1" />
+            <small>How long to wait for the chat box to appear before giving up.</small>
+          </label>
+        </div>
+
+        <div class="card settings-card">
+          <h3>Your data</h3>
+          <p class="muted">
+            Contexts are stored locally in this browser profile. Nothing is sent anywhere until
+            you attach it to a chat.
+          </p>
+          <div class="row">
+            <button id="export" class="btn" type="button">Export</button>
+            <button id="import" class="btn" type="button">Import</button>
+            <button id="clear" class="btn danger" type="button">Delete all</button>
+            <input id="import-input" type="file" accept="application/json" hidden />
+          </div>
+        </div>
+
+        <div class="card settings-card hints">
+          <h3>How the attach works</h3>
+          <ol>
+            <li>Context Drop looks for the page’s file picker and hands it your file.</li>
+            <li>If the page has no picker yet (Google AI Mode), it opens the “add files” menu first.</li>
+            <li>If that is ignored, it drops the file onto the chat box.</li>
+            <li>If the site still refuses, the text goes into the prompt.</li>
+          </ol>
+          <p class="muted">
+            Sites change often. If attaching stops working, reload the tab once so the extension
+            picks up the latest page structure.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <dialog id="edit-dialog" class="dialog">
+      <form method="dialog">
+        <h3 id="edit-title">Edit text context</h3>
+        <textarea id="edit-body" rows="14"></textarea>
+        <div class="row end">
+          <button class="btn" value="cancel" type="submit">Cancel</button>
+          <button id="edit-save" class="btn primary" value="save" type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
