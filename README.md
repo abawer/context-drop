@@ -75,7 +75,7 @@ The extension requests the `storage`, `scripting`, and `tabs` permissions, plus 
 
 There is no automatic cross-device sync. Use **Export** and **Import** to move a library manually.
 
-See [Privacy Policy](privacy-policy.md) for details about local storage and when context content is sent to Google AI services.
+See [https://github.com/abawer/context-drop/blob/main/privacy-policy.md](privacy-policy.md) for details about local storage and when context content is sent to Google AI services.
 
 ## Development
 
