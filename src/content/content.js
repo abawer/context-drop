@@ -28,6 +28,7 @@
     'ms-autosize-textarea textarea',
     'textarea',
     'div[contenteditable="true"]',
+    'input[aria-label], input[placeholder]',
   ];
 
   const MAX_TEXT_FALLBACK_CHARS = 200000;
@@ -38,6 +39,9 @@
     contexts: [],
     ui: null,
   };
+  let googleModeObserver = null;
+  let observedAiMode = false;
+  let aiModeSelected = false;
 
   /* ---------------------------------------------------------------- *
    * Small helpers
@@ -98,6 +102,18 @@
         } catch {
           /* invalid selector in some root */
         }
+      }
+    }
+    return [...found];
+  }
+
+  function deepQueryWithin(root, selector) {
+    const found = new Set();
+    for (const scope of walkRoots(root)) {
+      try {
+        scope.querySelectorAll(selector).forEach((el) => found.add(el));
+      } catch {
+        /* invalid selector in some root */
       }
     }
     return [...found];
@@ -166,9 +182,63 @@
     return 0;
   }
 
+  function isGoogleHost() {
+    return /(^|\.)google\.[a-z.]+$/i.test(location.hostname);
+  }
+
+  function hasAiModeComposer() {
+    const fields = deepQueryAll('textarea, input, [contenteditable="true"]').filter(isVisible);
+    const hasNearbyButton = (field) => {
+      for (let container = field, depth = 0; container && depth < 5; depth += 1) {
+        if (
+          [...container.querySelectorAll('button, [role="button"]')].some(isVisible)
+        ) return true;
+        container = container.parentElement;
+      }
+      return false;
+    };
+
+    const chatField = fields.some(
+      (field) =>
+        field.tagName === 'TEXTAREA' &&
+        field.getAttribute('role') !== 'combobox' &&
+        hasNearbyButton(field),
+    );
+    if (chatField) return true;
+
+    const isHomePage = /^\/(?:webhp)?\/?$/i.test(location.pathname);
+    return (
+      isHomePage &&
+      deepQueryAll('h1').some(isVisible) &&
+      fields.some((field) => field.tagName === 'TEXTAREA' && field.getAttribute('role') === 'combobox')
+    );
+  }
+
+  function isAiModeActive() {
+    if (!isGoogleHost()) return false;
+    const params = new URLSearchParams(location.search);
+    return (
+      location.pathname.startsWith('/ai') ||
+      params.get('udm') === '50' ||
+      aiModeSelected ||
+      hasAiModeComposer()
+    );
+  }
+
+  function isGoogleSearchEntry() {
+    return isGoogleHost() && /^\/(?:search|webhp)?\/?$/i.test(location.pathname);
+  }
+
+  function isAttachablePage() {
+    return !isGoogleHost() || isAiModeActive();
+  }
+
   function findComposer() {
     for (const selector of COMPOSER_SELECTORS) {
-      const candidates = deepQueryAll(selector).filter(isVisible);
+      let candidates = deepQueryAll(selector).filter(isVisible);
+      if (isGoogleSearchEntry() && !isAiModeActive()) {
+        candidates = candidates.filter((el) => composerHintScore(el) > 0);
+      }
       if (candidates.length) {
         candidates.sort(
           (a, b) => composerHintScore(b) - composerHintScore(a) || areaOf(b) - areaOf(a),
@@ -179,8 +249,19 @@
     return null;
   }
 
-  function findFileInput(file) {
-    const inputs = deepQueryAll('input[type="file"]').filter(
+  function composerScope(composer) {
+    if (!composer) return document;
+    const revealSelector =
+      'button[aria-haspopup="menu"], button[aria-haspopup="dialog"], [role="button"][aria-haspopup="menu"], [role="button"][aria-haspopup="dialog"]';
+    for (let container = composer.parentElement; container; container = container.parentElement) {
+      if (deepQueryWithin(container, revealSelector).some(isVisible)) return container;
+      if (container === document.body) break;
+    }
+    return composer;
+  }
+
+  function findFileInput(file, scope = document) {
+    const inputs = deepQueryWithin(scope, 'input[type="file"]').filter(
       (el) => el.isConnected && !el.disabled,
     );
     if (!inputs.length) return null;
@@ -220,10 +301,10 @@
   // Some surfaces (Google AI Mode) only build their file inputs once the
   // "add files" menu is opened. Those buttons open a page menu, not the OS
   // picker, so clicking them is safe.
-  function findRevealButtons() {
+  function findRevealButtons(scope = document) {
     const selector =
       'button[aria-haspopup="menu"], button[aria-haspopup="dialog"], [role="button"][aria-haspopup="menu"], [role="button"][aria-haspopup="dialog"]';
-    return deepQueryAll(selector)
+    return deepQueryWithin(scope, selector)
       .filter(isVisible)
       .filter((el) => {
         const label = [el.getAttribute('aria-label'), el.getAttribute('title'), el.textContent]
@@ -233,8 +314,8 @@
       });
   }
 
-  async function revealFileInput(file) {
-    for (const button of findRevealButtons().slice(0, 2)) {
+  async function revealFileInput(file, scope = document) {
+    for (const button of findRevealButtons(scope).slice(0, 2)) {
       try {
         button.click();
       } catch {
@@ -243,15 +324,14 @@
       const deadline = Date.now() + 1600;
       while (Date.now() < deadline) {
         await sleep(200);
-        const input = findFileInput(file);
+        const input = findFileInput(file, scope);
         if (input) return input;
       }
     }
     return null;
   }
 
-  function findDropZone() {
-    const composer = findComposer();
+  function findDropZone(composer = findComposer()) {
     if (composer) {
       return (
         composer.closest('form') ||
@@ -263,11 +343,37 @@
     return rich || document.body;
   }
 
-  function pageKind() {
-    if (!/(^|\.)google\.[a-z.]+$/i.test(location.hostname)) return 'site';
-    const params = new URLSearchParams(location.search);
-    if (location.pathname.startsWith('/ai') || params.get('udm') === '50') return 'aimode';
-    return 'other-google';
+  function watchGoogleMode() {
+    if (googleModeObserver || !isGoogleHost()) return;
+    observedAiMode = isAiModeActive();
+    document.addEventListener('click', (event) => {
+      const target = event.target instanceof Element
+        ? event.target.closest('[role="link"]')
+        : null;
+      if (!target || !target.closest('[role="search"]') || isAiModeActive()) return;
+      aiModeSelected = true;
+      observedAiMode = true;
+      if (state.ui) state.ui.host.style.display = '';
+      bootstrap();
+    }, true);
+    googleModeObserver = new MutationObserver(() => {
+      const active = isAiModeActive();
+      if (active === observedAiMode) return;
+      observedAiMode = active;
+      if (!active) {
+        if (state.ui) state.ui.host.style.display = 'none';
+        return;
+      }
+      if (state.ui) state.ui.host.style.display = '';
+      bootstrap();
+    });
+    googleModeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['placeholder', 'aria-label', 'data-placeholder'],
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
   }
 
   /* ---------------------------------------------------------------- *
@@ -411,7 +517,9 @@
   async function waitForPageReady(timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      if (findComposer() || deepQueryAll('input[type="file"]').length > 0) return true;
+      if (findComposer() || (isAttachablePage() && deepQueryAll('input[type="file"]').length > 0)) {
+        return true;
+      }
       await sleep(250);
     }
     return false;
@@ -419,6 +527,9 @@
 
   async function attachPayload(payload, settings) {
     if (!payload) return { ok: false, error: 'No context selected.' };
+    if (!isAttachablePage()) {
+      return { ok: false, error: 'Open Google AI Mode before attaching a context.' };
+    }
     if (state.busy) return { ok: false, error: 'An attach is already running.' };
 
     state.busy = true;
@@ -433,12 +544,17 @@
         toast?.show(error, 'error', 8000);
         return { ok: false, error };
       }
+      if (!isAttachablePage()) {
+        return { ok: false, error: 'Open Google AI Mode before attaching a context.' };
+      }
 
       const file = fileFromPayload(payload);
       const before = countNameMentions(file.name);
       const notes = [];
 
-      const input = findFileInput(file) || (await revealFileInput(file));
+      const composer = findComposer();
+      const scope = composerScope(composer);
+      const input = findFileInput(file, scope) || (await revealFileInput(file, scope));
       if (input) {
         try {
           setInputFiles(input, [file]);
@@ -456,7 +572,7 @@
       }
 
       toast?.show('Trying drag & drop…', 'info', 0);
-      const zone = findDropZone();
+      const zone = findDropZone(composer);
       if (zone) {
         dispatchDrop(zone, [file]);
         if (await confirmAttached(file, before, 6000)) {
@@ -782,11 +898,15 @@
    * ---------------------------------------------------------------- */
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'IS_AI_MODE_ACTIVE') {
+      sendResponse({ ok: true, active: isAiModeActive() });
+      return false;
+    }
     if (message?.type === 'ATTACH_CONTEXT') {
-      if (pageKind() === 'other-google') {
+      if (!isAttachablePage()) {
         sendResponse({
           ok: false,
-          error: 'This is not an AI Mode page. Open Google AI Mode, Gemini or AI Studio.',
+          error: 'Open Google AI Mode before attaching a context, or use Gemini or AI Studio.',
         });
         return false;
       }
@@ -813,7 +933,7 @@
   }
 
   async function autoAttachContexts() {
-    if (!state.settings.autoAttachOnChatOpen || pageKind() === 'other-google') return;
+    if (!state.settings.autoAttachOnChatOpen || !isAttachablePage()) return;
 
     try {
       const response = await chrome.runtime.sendMessage({ type: 'GET_AUTO_CONTEXT' });
@@ -829,8 +949,11 @@
   }
 
   async function bootstrap() {
-    // The script also runs on regular Google results pages – leave those alone.
-    if (pageKind() === 'other-google') return;
+    if (!isAttachablePage()) {
+      if (isGoogleSearchEntry()) watchGoogleMode();
+      return;
+    }
+    watchGoogleMode();
 
     try {
       const response = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
