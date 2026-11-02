@@ -44,9 +44,9 @@ The popup remembers the checkbox selection between openings. Auto-attach operate
 | --- | --- |
 | Gemini | `https://gemini.google.com/*` |
 | Google AI Studio | `https://aistudio.google.com/*` |
-| Google AI Mode | AI Mode pages on `www.google.com` or `www.google.co.il`, including `/ai` and search URLs with `udm=50` |
+| Google AI Mode | AI Mode pages on `www.google.com` or `www.google.co.il`, including `/ai`, search URLs with `udm=50`, and the homepage after AI Mode is selected |
 
-Google AI Mode must be available to the signed-in account and region. Regular Google search pages are not treated as AI chats.
+Google AI Mode must be available to the signed-in account and region. On Google home and search pages, the extension detects the active AI prompt even when selecting AI Mode does not change the URL. The Context panel and attach action remain hidden on regular search results and before AI Mode is selected. Auto-attach is limited to chat pages.
 
 ## Attachment Behavior
 

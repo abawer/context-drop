@@ -4,6 +4,7 @@ import {
   formatBytes,
   getContexts,
   getSettings,
+  isSupportedUrl,
   siteForUrl,
   saveSettings,
 } from '../lib/store.js';
@@ -16,6 +17,7 @@ const state = {
   selectedIds: [],
   settings: null,
   tab: null,
+  aiModeActive: false,
 };
 
 const els = {
@@ -58,6 +60,17 @@ async function loadState() {
   state.contexts = contexts;
   state.settings = settings;
   state.tab = tabs[0] || null;
+  state.aiModeActive = false;
+  if (state.tab?.id) {
+    try {
+      const response = await chrome.tabs.sendMessage(state.tab.id, {
+        type: 'IS_AI_MODE_ACTIVE',
+      });
+      state.aiModeActive = response?.active === true;
+    } catch {
+      /* no content script on this tab */
+    }
+  }
 
   const preferred = stored[LAST_CONTEXT_KEY];
   const availableIds = new Set(contexts.map((context) => context.id));
@@ -132,13 +145,18 @@ function renderList() {
 
 function updateActions() {
   const hasContext = state.selectedIds.length > 0;
-  const site = state.tab?.url ? siteForUrl(state.tab.url) : null;
+  const site = state.aiModeActive
+    ? SITES.aimode
+    : state.tab?.url
+      ? siteForUrl(state.tab.url)
+      : null;
+  const supported = state.aiModeActive || (state.tab?.url && isSupportedUrl(state.tab.url));
   const hasTab = Boolean(state.tab?.id);
 
   els.openPrimary.disabled = false;
   els.openAlt1.disabled = false;
   els.openAlt2.disabled = false;
-  els.attachCurrent.disabled = !hasContext || !site || !hasTab;
+  els.attachCurrent.disabled = !hasContext || !supported || !hasTab;
 
   if (!hasContext) {
     els.hint.textContent = 'Open a chat without a context, or add/select contexts to attach.';
@@ -152,6 +170,7 @@ function updateActions() {
 }
 
 function currentSiteDefault() {
+  if (state.aiModeActive) return SITES.aimode.id;
   const fromTab = state.tab?.url ? siteForUrl(state.tab.url) : null;
   if (fromTab) return fromTab.id;
   const saved = state.settings?.defaultSite;
