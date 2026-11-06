@@ -249,6 +249,124 @@
     return null;
   }
 
+  function captureChatTranscript() {
+    const selectorTiers = [
+      'user-query, model-response, ms-chat-turn',
+      '[data-message-author-role], [data-testid*="conversation-turn"], [data-testid*="chat-turn"]',
+      '[class*="chat-turn"], [class*="conversation-turn"], [class*="message-content"]',
+    ];
+
+    for (const selector of selectorTiers) {
+      const turns = deepQueryAll(selector)
+        .filter((el) => isVisible(el) && !el.closest('textarea, input, [contenteditable="true"]'))
+        .filter((el) => !el.parentElement?.closest(selector));
+      const messages = turns
+        .map((el) => {
+          const text = (el.innerText || el.textContent || '')
+            .replace(/[\t ]+/g, ' ')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+          if (!text) return '';
+
+          const role = [
+            el.tagName === 'USER-QUERY' ? 'User' : '',
+            el.tagName === 'MODEL-RESPONSE' ? 'Assistant' : '',
+            el.getAttribute('data-message-author-role'),
+          ].find(Boolean);
+          return role ? `${role}:\n${text}` : text;
+        })
+        .filter(Boolean);
+      if (messages.length) return messages.join('\n\n');
+    }
+
+    if (isAttachablePage()) {
+      const excluded = [
+        'button', '[role="button"]', 'nav', 'header', 'footer', 'form',
+        'input', 'textarea', 'select', '[contenteditable="true"]',
+        '[aria-hidden="true"]', '[role="navigation"]', '[role="toolbar"]',
+        '[role="menu"]', '[role="tablist"]', '[role="search"]',
+        '[role="status"]', '[role="alert"]', '#context-drop-root',
+        'script', 'style', 'svg',
+      ].join(',');
+      const blockTags = new Set([
+        'ARTICLE', 'BLOCKQUOTE', 'BR', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+        'LI', 'OL', 'P', 'PRE', 'SECTION', 'UL',
+      ]);
+
+      function readVisibleText(root) {
+        const parts = [];
+        const visit = (node) => {
+          if (node.nodeType === Node.TEXT_NODE) {
+            parts.push(node.nodeValue || '');
+            return;
+          }
+          if (node instanceof Element) {
+            if (node !== root && (node.matches(excluded) || !isVisible(node))) return;
+            const block = blockTags.has(node.tagName);
+            if (block) parts.push('\n');
+            if (node.tagName === 'SLOT') {
+              const assigned = node.assignedNodes({ flatten: true });
+              (assigned.length ? assigned : node.childNodes).forEach(visit);
+            } else if (node.shadowRoot) {
+              node.shadowRoot.childNodes.forEach(visit);
+            } else {
+              node.childNodes.forEach(visit);
+            }
+            if (block) parts.push('\n');
+            return;
+          }
+          if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+            node.childNodes.forEach(visit);
+          }
+        };
+        visit(root);
+        return parts.join('')
+          .replace(/[\t ]+/g, ' ')
+          .replace(/ *\n */g, '\n')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+      }
+
+      if (isGoogleHost() && isAiModeActive()) {
+        const query = new URLSearchParams(location.search).get('q')?.trim();
+        const pageText = document.body?.innerText || '';
+        if (query && pageText) {
+          const escapedQuery = query
+            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            .replace(/\s+/g, '\\s+');
+          const promptMatches = [...pageText.matchAll(new RegExp(escapedQuery, 'giu'))];
+          if (promptMatches.length >= 2) {
+            return pageText.slice(promptMatches[0].index).trim();
+          }
+        }
+      }
+
+      const mainRegions = deepQueryAll('main, [role="main"]')
+        .filter(isVisible)
+        .sort((a, b) => areaOf(b) - areaOf(a));
+      if (isGoogleHost() && isAiModeActive()) {
+        const hasConversation = mainRegions.some((main) => {
+          const hasPrompt = deepQueryWithin(main, 'h2')
+            .filter(isVisible)
+            .some((heading) => (heading.innerText || '').trim());
+          const hasAnswer = deepQueryWithin(main, 'h3')
+            .filter(isVisible)
+            .some((heading) => (heading.innerText || '').trim());
+          return hasPrompt && hasAnswer;
+        });
+        if (!hasConversation) return '';
+      }
+      const textRegions = mainRegions.length
+        ? mainRegions
+        : [document.body].filter(isVisible);
+      const transcript = textRegions
+        .map(readVisibleText)
+        .sort((a, b) => b.length - a.length)[0];
+      if (transcript) return transcript;
+    }
+    return '';
+  }
+
   function composerScope(composer) {
     if (!composer) return document;
     const revealSelector =
@@ -691,10 +809,29 @@
         .item button {
           border: 1px solid #dadce0; background: #fff; color: #1a73e8;
           font: inherit; font-size: 12px; font-weight: 600;
-          padding: 5px 12px; border-radius: 999px; cursor: pointer;
+          padding: 5px 8px; border-radius: 999px; cursor: pointer;
         }
         .item button:hover { background: rgba(26,115,232,.08); border-color: #c6dafc; }
         .item button[disabled] { opacity: .55; cursor: default; }
+        .editor {
+          position: fixed; z-index: 1; left: 50%; top: 50%; transform: translate(-50%, -50%);
+          width: min(560px, calc(100vw - 32px)); max-height: min(80vh, 720px);
+          display: flex; flex-direction: column; gap: 10px; padding: 16px;
+          background: #fff; color: #1f1f1f; border-radius: 12px;
+          box-shadow: 0 12px 40px rgba(0,0,0,.32);
+        }
+        .editor[hidden] { display: none; }
+        .editor h2 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+        .editor textarea {
+          width: 100%; min-height: 240px; max-height: 55vh; resize: vertical;
+          border: 1px solid #dadce0; border-radius: 6px; padding: 10px;
+          color: inherit; background: transparent; font: 13px/1.5 ui-monospace, monospace;
+        }
+        .editor textarea[hidden], .editor p[hidden] { display: none; }
+        .editor p { margin: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+        .editor footer { display: flex; justify-content: flex-end; gap: 8px; }
+        .editor footer button { border: 1px solid #dadce0; background: transparent; color: inherit; padding: 7px 12px; border-radius: 6px; font: inherit; cursor: pointer; }
+        .editor footer .save { background: #1a73e8; color: #fff; border-color: #1a73e8; }
         .empty { padding: 12px 16px 16px; font-size: 12px; color: #5f6368; line-height: 1.5; }
         .panel footer {
           display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -726,6 +863,8 @@
           .item button:hover { background: rgba(138,180,248,.12); }
           .panel footer { border-top-color: rgba(232,234,237,.12); }
           .link { color: #8ab4f8; }
+          .editor { background: #202124; color: #e8eaed; }
+          .editor textarea, .editor footer button { border-color: #5f6368; }
         }
       </style>
       <button class="pill" type="button" title="Context Drop">
@@ -744,6 +883,16 @@
           <span class="version"></span>
         </footer>
       </section>
+      <section class="editor" role="dialog" aria-modal="true" hidden>
+        <h2 class="editor-title"></h2>
+        <textarea class="editor-body" aria-label="Saved context text"></textarea>
+        <p class="editor-file" hidden></p>
+        <footer>
+          <button class="editor-close" type="button">Close</button>
+          <button class="editor-download" type="button" hidden>Download</button>
+          <button class="editor-save save" type="button">Save</button>
+        </footer>
+      </section>
       <div class="toast" role="status" aria-live="polite"></div>
     `;
 
@@ -754,6 +903,14 @@
     const list = shadow.querySelector('.list');
     const toastEl = shadow.querySelector('.toast');
     const settingsBtn = shadow.querySelector('.settings');
+    const editor = shadow.querySelector('.editor');
+    const editorTitle = shadow.querySelector('.editor-title');
+    const editorBody = shadow.querySelector('.editor-body');
+    const editorFile = shadow.querySelector('.editor-file');
+    const editorSave = shadow.querySelector('.editor-save');
+    const editorDownload = shadow.querySelector('.editor-download');
+    let editingContext = null;
+    let downloadPayload = null;
 
     try {
       shadow.querySelector('.version').textContent = `v${chrome.runtime.getManifest().version}`;
@@ -792,6 +949,7 @@
       for (const context of state.contexts) {
         const row = document.createElement('div');
         row.className = 'item';
+        row.title = context.fileName || context.name;
 
         const meta = document.createElement('div');
         meta.className = 'meta';
@@ -803,9 +961,50 @@
 
         const sub = document.createElement('div');
         sub.className = 'sub';
-        sub.textContent = `${context.kind === 'text' ? 'Text' : 'File'} · ${formatBytes(context.size)}`;
+        const savedAt = context.createdAt
+          ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(context.createdAt)
+          : '';
+        sub.textContent = [context.kind === 'text' ? 'Text' : 'File', formatBytes(context.size), savedAt]
+          .filter(Boolean)
+          .join(' · ');
 
         meta.append(name, sub);
+
+        const viewButton = document.createElement('button');
+        viewButton.type = 'button';
+        viewButton.textContent = context.kind === 'text' ? 'Edit' : 'View';
+        viewButton.addEventListener('click', async () => {
+          viewButton.disabled = true;
+          try {
+            const response = await chrome.runtime.sendMessage({ type: 'GET_PAYLOAD', contextId: context.id });
+            if (!response?.ok || !response.payload) {
+              throw new Error(response?.error || 'Could not read the context');
+            }
+            const payload = response.payload;
+            const isText = context.kind === 'text' || isTextual(payload.mime || '');
+            editingContext = context.kind === 'text' ? context : null;
+            downloadPayload = payload;
+            editorTitle.textContent = context.name;
+            editorBody.hidden = !isText;
+            editorBody.readOnly = context.kind !== 'text';
+            editorBody.value = isText
+              ? new TextDecoder().decode(base64ToBytes(payload.base64))
+              : '';
+            editorFile.hidden = isText;
+            editorFile.textContent = isText
+              ? ''
+              : `${payload.fileName || context.name} · ${payload.mime || 'File'} · ${formatBytes(payload.size)}`;
+            editorSave.hidden = context.kind !== 'text';
+            editorDownload.hidden = false;
+            editor.hidden = false;
+            if (context.kind === 'text') editorBody.focus();
+            else editorDownload.focus();
+          } catch (error) {
+            toast.show(error?.message || 'Could not open this context', 'error', 5000);
+          } finally {
+            viewButton.disabled = false;
+          }
+        });
 
         const button = document.createElement('button');
         button.type = 'button';
@@ -839,7 +1038,34 @@
           button.textContent = 'Attach';
         });
 
-        row.append(meta, button);
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.textContent = 'Delete';
+        deleteButton.title = `Delete ${context.name}`;
+        deleteButton.addEventListener('click', async () => {
+          if (!window.confirm(`Delete “${context.name}”?`)) return;
+          deleteButton.disabled = true;
+          try {
+            const response = await chrome.runtime.sendMessage({
+              type: 'DELETE_CONTEXT',
+              contextId: context.id,
+            });
+            if (!response?.ok) throw new Error(response?.error || 'Could not delete the context');
+            if (editingContext?.id === context.id) {
+              editor.hidden = true;
+              editingContext = null;
+              downloadPayload = null;
+            }
+            toast.show('Context deleted', 'success');
+            await refreshContexts();
+          } catch (error) {
+            toast.show(error?.message || 'Could not delete the context', 'error', 5000);
+          } finally {
+            deleteButton.disabled = false;
+          }
+        });
+
+        row.append(meta, button, viewButton, deleteButton);
         list.appendChild(row);
       }
     }
@@ -863,12 +1089,57 @@
     }
 
     pill.addEventListener('click', () => openPanel(panel.hidden));
+    shadow.querySelector('.editor-close').addEventListener('click', () => {
+      editor.hidden = true;
+      editingContext = null;
+      downloadPayload = null;
+    });
+    editorSave.addEventListener('click', async () => {
+      if (!editingContext) return;
+      editorSave.disabled = true;
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: 'UPDATE_TEXT_CONTEXT',
+          contextId: editingContext.id,
+          text: editorBody.value,
+        });
+        if (!response?.ok) throw new Error(response?.error || 'Could not save the context');
+        editor.hidden = true;
+        toast.show('Context saved', 'success');
+        editingContext = null;
+        await refreshContexts();
+      } catch (error) {
+        toast.show(error?.message || 'Could not save the context', 'error', 5000);
+      } finally {
+        editorSave.disabled = false;
+      }
+    });
+    editorDownload.addEventListener('click', () => {
+      if (!downloadPayload) return;
+      const blob = new Blob([base64ToBytes(downloadPayload.base64)], {
+        type: downloadPayload.mime || 'application/octet-stream',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = downloadPayload.fileName || 'context';
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    });
     shadow.querySelector('.close').addEventListener('click', () => openPanel(false));
     settingsBtn.addEventListener('click', () => {
       chrome.runtime.sendMessage({ type: 'OPEN_OPTIONS' }).catch(() => {});
     });
     shadow.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') openPanel(false);
+      if (event.key === 'Escape') {
+        if (!editor.hidden) {
+          editor.hidden = true;
+          editingContext = null;
+          downloadPayload = null;
+        } else {
+          openPanel(false);
+        }
+      }
     });
 
     if (!state.settings.showFloatingButton) {
@@ -902,6 +1173,26 @@
       sendResponse({ ok: true, active: isAiModeActive() });
       return false;
     }
+    if (message?.type === 'CAPTURE_CHAT') {
+      if (!isAttachablePage()) {
+        sendResponse({ ok: false, error: 'Open a supported AI chat before saving it.' });
+        return false;
+      }
+      const text = captureChatTranscript();
+      sendResponse(text
+        ? { ok: true, text, title: document.title }
+        : { ok: false, error: 'No conversation was found on this page.' });
+      return false;
+    }
+    if (message?.type === 'CHAT_SAVE_RESULT') {
+      const result = message.result || {};
+      ui()?.toast.show(
+        result.ok ? `${result.name} saved to Context Drop` : result.error || 'Could not save this chat.',
+        result.ok ? 'success' : 'error',
+        6000,
+      );
+      return false;
+    }
     if (message?.type === 'ATTACH_CONTEXT') {
       if (!isAttachablePage()) {
         sendResponse({
@@ -921,6 +1212,17 @@
       return true;
     }
     return false;
+  });
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (
+      areaName === 'local' &&
+      changes.contexts &&
+      state.ui &&
+      !state.ui.panel.hidden
+    ) {
+      state.ui.refreshContexts();
+    }
   });
 
   async function claimPendingOnce() {

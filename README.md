@@ -7,8 +7,14 @@ Context Drop is a Chromium browser extension for saving files and notes locally 
 - Save files or pasted text in a local context library.
 - Select one or more contexts in the extension popup and open them in Gemini, AI Mode, or AI Studio. The destination buttons also open a chat when no context is selected (or saved).
 - Attach selected contexts to a supported chat already open in the current tab.
+- Right-click a conversation on a supported page and save its transcript as a reusable text context.
+- Select text on any webpage, right-click, and save it with its source URL as a reusable text context.
 - Optionally auto-attach all saved contexts when a supported chat page opens. This setting is off by default.
-- Use the floating Context button on supported pages to choose and attach a context.
+- Use the floating Context button on supported pages to view saved contexts and attach them without leaving the page.
+- View or edit saved text, view or download uploaded files, and delete contexts from the floating panel.
+- See each context's saved date and time in the popup, floating panel, and Settings library; hover a context name in the popup or floating panel to see its full filename.
+- Get an on-page and browser notification after saving a chat or selected web text from the right-click menu.
+- Keep the floating context list current while it is open; additions and deletions in the library appear without reopening the panel.
 - If file attachment fails, optionally insert supported text content into the prompt, with a configurable prefix.
 - Rename contexts, edit saved text, import/export the library, and delete individual or all contexts.
 
@@ -32,9 +38,12 @@ The manifest declares Chrome 116 as the minimum version. The browser must suppor
 | Open a chat with contexts | Open the extension popup, select one or more contexts, then choose Gemini, AI Studio, or Google AI Mode. Attachments are attempted sequentially. |
 | Open a chat without contexts | Choose a destination button with nothing selected. A chat opens without an attachment. |
 | Attach to the current chat | Open a supported chat, select one or more contexts in the popup, then choose **Attach to current tab**. |
+| Save a chat for later | Right-click a conversation on Gemini, Google AI Mode, or AI Studio, then choose **Save this chat to Context Drop**. The transcript appears in the context library as editable text. |
+| Save selected web text | Select text on a webpage, right-click, then choose **Save selected text to Context Drop**. The selected text and page URL are saved in the context library. A page notice and browser notification confirm the result. |
 | Attach from the page | Use the floating **Context** button, if enabled, and choose a saved context to attach. |
+| View, edit, or delete from the page | Open the floating **Context** panel. Choose **View** to inspect or download an uploaded file, **Edit** to change a saved text context, or **Delete** and confirm to remove a context. Each item shows its saved date and time; hover its name to see the full filename. The open list refreshes when contexts are added or removed elsewhere. |
 | Auto-attach on chat open | In Settings, enable **Auto-attach when a chat opens**. All saved contexts are attempted when a supported chat page opens, unless that page has a queued explicit attachment request. |
-| Manage or back up contexts | Use Settings to rename, edit saved text, export the library to JSON, import an export, or delete contexts. |
+| Manage or back up contexts | Use Settings to rename contexts, edit saved text, download files, delete individual or all contexts, export the library to JSON, or import an export. |
 
 The popup remembers the checkbox selection between openings. Auto-attach operates on all saved contexts, independently of the popup selection.
 
@@ -62,6 +71,7 @@ The receiving service may reject file types or sizes it does not support. Google
 
 - **Default destination:** the primary destination button when the current tab is not one of the supported services.
 - **Fall back to text:** enabled by default; controls prompt insertion after file attachment attempts fail.
+- **Popup fallback toggle:** quickly enable or disable text fallback from the extension popup for the next attachment.
 - **Auto-attach when a chat opens:** disabled by default; when enabled, attempts every saved context on supported chat pages.
 - **Text prefix:** defaults to `Context for this conversation:` followed by blank lines.
 - **Floating button in Google AI:** enabled by default.
@@ -71,15 +81,16 @@ The receiving service may reject file types or sizes it does not support. Google
 
 Context metadata and settings are stored in `chrome.storage.local`; file contents are stored in IndexedDB in the browser profile. The extension does not use a remote storage service. When you attach a context, its content is provided to the selected Google AI page and is then subject to that service's handling and privacy policies.
 
-The extension requests the `storage`, `scripting`, and `tabs` permissions, plus access to `gemini.google.com`, `aistudio.google.com`, `www.google.com`, and `www.google.co.il`. These permissions support the local library, popup actions, and page-side attachment workflow.
+The extension requests the `storage`, `scripting`, `tabs`, `contextMenus`, `activeTab`, and `notifications` permissions, plus access to `gemini.google.com`, `aistudio.google.com`, `www.google.com`, and `www.google.co.il`. These permissions support the local library, popup actions, page-side attachment workflow, right-click context menus and selected-text capture, and save-result notifications.
 
 There is no automatic cross-device sync. Use **Export** and **Import** to move a library manually.
+The JSON export contains the saved settings and each context's metadata and content; content bytes are base64-encoded in the export. Import restores the contexts and any included settings.
 
 See [privacy-policy.md](https://github.com/abawer/context-drop/blob/main/privacy-policy.md) for details about local storage and when context content is sent to Google AI services.
 
 ## Development
 
-This project is a plain Manifest V3 extension and has no package manifest or automated test command in the repository. For a manual smoke test, load the unpacked extension, add at least two contexts, select both in the popup, and open a supported destination. Also check the no-context open path, current-tab attachment, text fallback, and (if needed) auto-attach from Settings.
+This project is a plain Manifest V3 extension and has no package manifest or automated test command in the repository. For a manual smoke test, load the unpacked extension, add at least two contexts, select both in the popup, and open a supported destination. Also check the no-context open path, current-tab attachment, text fallback from both the popup and Settings, auto-attach, right-click chat and selected-text saving, floating-panel list refresh, text edit, file view/download, delete confirmation, and JSON export/import.
 
 ```text
 manifest.json             Extension manifest

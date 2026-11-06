@@ -206,6 +206,7 @@ export function slugFileName(name, extension = 'txt') {
   const slug = String(name || 'context')
     .toLowerCase()
     .replace(/[^a-z0-9\u0590-\u05FF._-]+/g, '-')
+    .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '');
   const base = slug || 'context';
   return base.toLowerCase().endsWith(`.${extension}`)
@@ -353,6 +354,15 @@ export function formatBytes(bytes) {
   const i = Math.min(Math.floor(Math.log(n) / Math.log(1024)), units.length - 1);
   const value = n / 1024 ** i;
   return `${value >= 10 || i === 0 ? Math.round(value) : value.toFixed(1)} ${units[i]}`;
+}
+
+export function formatDateTime(timestamp) {
+  const date = new Date(Number(timestamp));
+  if (!Number.isFinite(date.getTime())) return '';
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
 }
 
 export function describeContext(meta) {

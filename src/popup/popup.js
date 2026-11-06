@@ -2,6 +2,7 @@ import {
   SITES,
   SITE_ORDER,
   formatBytes,
+  formatDateTime,
   getContexts,
   getSettings,
   isSupportedUrl,
@@ -117,10 +118,14 @@ function renderList() {
 
     const sub = document.createElement('span');
     sub.className = 'sub';
-    const note = context.note ? ` · ${context.note}` : '';
-    sub.textContent = `${context.kind === 'text' ? 'Text' : 'File'} · ${formatBytes(context.size)}${
-      context.kind === 'file' && context.fileName !== context.name ? ` · ${context.fileName}` : ''
-    }${note}`;
+    const details = [
+      context.kind === 'text' ? 'Text' : 'File',
+      formatBytes(context.size),
+      formatDateTime(context.createdAt),
+      context.kind === 'file' && context.fileName !== context.name ? context.fileName : '',
+      context.note,
+    ].filter(Boolean);
+    sub.textContent = details.join(' · ');
 
     meta.append(name, sub);
     option.append(dot, meta);

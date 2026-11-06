@@ -1,8 +1,12 @@
 import {
   SITES,
+  addTextContext,
+  getContext,
   getContexts,
   getSettings,
   payloadFor,
+  removeContext,
+  updateTextContext,
 } from './lib/store.js';
 
 const PENDING_PREFIX = 'pending:';
@@ -12,8 +16,59 @@ const CONTENT_FILE = 'src/content/content.js';
 const BADGE_OK_COLOR = '#188038';
 const BADGE_ERR_COLOR = '#c5221f';
 const BADGE_BUSY_COLOR = '#1a73e8';
+const SAVE_CHAT_MENU_ID = 'context-drop-save-chat';
+const SAVE_SELECTION_MENU_ID = 'context-drop-save-selection';
+const CHAT_PAGE_PATTERNS = [
+  'https://gemini.google.com/*',
+  'https://aistudio.google.com/*',
+  'https://www.google.com/*',
+  'https://www.google.co.il/*',
+];
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function showSaveFeedback(tab, result) {
+  if (tab?.id) {
+    setBadge(tab.id, result.ok ? '✓' : '!', result.ok ? BADGE_OK_COLOR : BADGE_ERR_COLOR);
+    chrome.action.setTitle({
+      tabId: tab.id,
+      title: result.ok
+        ? `Context Drop - saved ${result.name}`
+        : `Context Drop - ${result.error || 'save failed'}`,
+    }).catch(() => {});
+
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      args: [result.ok ? `${result.name} saved to Context Drop` : result.error || 'Could not save'],
+      func: (message) => {
+        document.getElementById('context-drop-save-notice')?.remove();
+        const notice = document.createElement('div');
+        notice.id = 'context-drop-save-notice';
+        notice.setAttribute('role', 'status');
+        notice.setAttribute('aria-live', 'polite');
+        notice.textContent = message;
+        notice.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:2147483647;max-width:min(420px,calc(100vw - 32px));padding:12px 16px;border-radius:8px;background:#202124;color:#fff;font:14px/1.4 system-ui,sans-serif;box-shadow:0 4px 16px #0005;';
+        document.documentElement.appendChild(notice);
+        setTimeout(() => notice.remove(), 5000);
+      },
+    }).catch(() => {});
+  }
+
+  try {
+    chrome.notifications.create('', {
+      type: 'basic',
+      iconUrl: 'icons/icon48.png',
+      title: result.ok ? 'Context Drop: saved' : 'Context Drop: save failed',
+      message: result.ok ? `${result.name} added to your library.` : result.error || 'Could not save.',
+    }, () => {
+      if (chrome.runtime.lastError) {
+        console.debug('[Context Drop] notification unavailable:', chrome.runtime.lastError.message);
+      }
+    });
+  } catch (error) {
+    console.debug('[Context Drop] notification unavailable:', error?.message || String(error));
+  }
+}
 
 /* ------------------------------------------------------------------ *
  * Lifecycle
@@ -21,12 +76,101 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 chrome.runtime.onInstalled.addListener(async (details) => {
   await chrome.action.setBadgeBackgroundColor({ color: BADGE_BUSY_COLOR }).catch(() => {});
+  await chrome.contextMenus.removeAll();
+  chrome.contextMenus.create({
+    id: SAVE_SELECTION_MENU_ID,
+    title: 'Save selected text to Context Drop',
+    contexts: ['selection'],
+  });
+  chrome.contextMenus.create({
+    id: SAVE_CHAT_MENU_ID,
+    title: 'Save this chat to Context Drop',
+    contexts: ['page'],
+    documentUrlPatterns: CHAT_PAGE_PATTERNS,
+  });
   if (details.reason === 'install') {
     // Make sure the settings key exists so the options page has something to read.
     await getSettings().catch(() => {});
     if (chrome.runtime.openOptionsPage) {
       chrome.runtime.openOptionsPage().catch(() => {});
     }
+  }
+});
+
+async function saveChatFromTab(tab) {
+  if (!tab?.id) return;
+
+  let capture;
+  try {
+    capture = await chrome.tabs.sendMessage(tab.id, { type: 'CAPTURE_CHAT' });
+  } catch {
+    try {
+      await injectContentScript(tab.id);
+      capture = await chrome.tabs.sendMessage(tab.id, { type: 'CAPTURE_CHAT' });
+    } catch (error) {
+      capture = { ok: false, error: error?.message || 'Could not read this chat.' };
+    }
+  }
+
+  let result;
+  if (!capture?.ok || !capture.text) {
+    result = { ok: false, error: capture?.error || 'No conversation text was found.' };
+  } else {
+    try {
+      const title = String(capture.title || 'Saved chat').trim().slice(0, 100);
+      const context = await addTextContext(capture.text, {
+        name: `Chat - ${title || 'Saved chat'}`,
+        note: 'Saved conversation',
+      });
+      result = { ok: true, name: context.name };
+    } catch (error) {
+      result = { ok: false, error: error?.message || 'Could not save this chat.' };
+    }
+  }
+
+  showSaveFeedback(tab, result);
+}
+
+async function saveSelectedText(info, tab) {
+  let pageSelection = '';
+  if (tab?.id) {
+    try {
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => window.getSelection()?.toString() || '',
+      });
+      pageSelection = result?.result || '';
+    } catch {
+      /* restricted pages may not allow a temporary active-tab read */
+    }
+  }
+  const selectedText = [pageSelection, info.selectionText]
+    .map((text) => String(text || '').trim())
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length)[0] || '';
+  if (!selectedText) return;
+
+  const sourceUrl = info.pageUrl || tab?.url || '';
+  const sourceTitle = String(tab?.title || sourceUrl || 'Web page').trim().slice(0, 100);
+  const content = sourceUrl ? `${selectedText}\n\nSource: ${sourceUrl}` : selectedText;
+
+  try {
+    const context = await addTextContext(content, {
+      name: `Web text - ${sourceTitle || 'Web page'}`,
+      note: 'Selected web text',
+    });
+    const result = { ok: true, name: context.name };
+    showSaveFeedback(tab, result);
+  } catch (error) {
+    showSaveFeedback(tab, { ok: false, error: error?.message || 'Could not save selected text.' });
+  }
+}
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === SAVE_SELECTION_MENU_ID) {
+    saveSelectedText(info, tab);
+  } else if (info.menuItemId === SAVE_CHAT_MENU_ID) {
+    saveChatFromTab(tab);
   }
 });
 
@@ -247,15 +391,32 @@ const handlers = {
     const contexts = await getContexts();
     return {
       ok: true,
-      contexts: contexts.map(({ id, name, kind, fileName, size, mime }) => ({
+      contexts: contexts.map(({ id, name, kind, fileName, size, mime, createdAt }) => ({
         id,
         name,
         kind,
         fileName,
         size,
         mime,
+        createdAt,
       })),
     };
+  },
+
+  async UPDATE_TEXT_CONTEXT(message) {
+    const context = await getContext(message.contextId);
+    if (!context || context.kind !== 'text') {
+      return { ok: false, error: 'Only saved text contexts can be edited here.' };
+    }
+    await updateTextContext(context.id, message.text);
+    return { ok: true };
+  },
+
+  async DELETE_CONTEXT(message) {
+    const context = await getContext(message.contextId);
+    if (!context) return { ok: false, error: 'Context not found.' };
+    await removeContext(context.id);
+    return { ok: true };
   },
 
   async GET_SETTINGS() {

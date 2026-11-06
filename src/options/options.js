@@ -4,6 +4,7 @@ import {
   addFileContext,
   addTextContext,
   formatBytes,
+  formatDateTime,
   getContextBlob,
   getContexts,
   getSettings,
@@ -96,10 +97,12 @@ function contextCard(context) {
 
   const meta = document.createElement('div');
   meta.className = 'meta';
+  const savedAt = formatDateTime(context.createdAt);
   const parts = [
     context.kind === 'text' ? 'Pasted text' : context.fileName,
     formatBytes(context.size),
     context.mime,
+    savedAt ? `Saved ${savedAt}` : '',
   ].filter(Boolean);
   meta.textContent = parts.join(' · ');
   if (context.note) meta.textContent += ` · ${context.note}`;
@@ -482,5 +485,9 @@ async function init() {
     console.info('[Context Drop] no text contexts – the fallback will not apply to binary files');
   }
 }
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes.contexts) refresh();
+});
 
 init();
