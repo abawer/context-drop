@@ -21,16 +21,6 @@
     showFloatingButton: true,
   };
 
-  const COMPOSER_SELECTORS = [
-    'rich-textarea div[contenteditable="true"]',
-    'div[contenteditable="true"][role="textbox"]',
-    'textarea[placeholder]',
-    'ms-autosize-textarea textarea',
-    'textarea',
-    'div[contenteditable="true"]',
-    'input[aria-label], input[placeholder]',
-  ];
-
   const MAX_TEXT_FALLBACK_CHARS = 200000;
 
   const state = {
@@ -39,9 +29,8 @@
     contexts: [],
     ui: null,
   };
-  let googleModeObserver = null;
-  let observedAiMode = false;
-  let aiModeSelected = false;
+  const pageAdapter = window.ContextDropSiteAdapters?.resolve(location);
+  let pageAdapterInstalled = false;
 
   /* ---------------------------------------------------------------- *
    * Small helpers
@@ -166,90 +155,46 @@
    * Page location
    * ---------------------------------------------------------------- */
 
-  function composerHintScore(el) {
-    const hints = [
-      el.getAttribute('aria-label'),
-      el.getAttribute('placeholder'),
-      el.getAttribute('data-placeholder'),
-      el.getAttribute('aria-placeholder'),
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
-    if (!hints) return 0;
-    if (/system|instruction|setting/.test(hints)) return -40;
-    if (/prompt|message|ask|chat|question|type|reply|write/.test(hints)) return 40;
-    return 0;
-  }
-
-  function isGoogleHost() {
-    return /(^|\.)google\.[a-z.]+$/i.test(location.hostname);
-  }
-
-  function hasAiModeComposer() {
-    const fields = deepQueryAll('textarea, input, [contenteditable="true"]').filter(isVisible);
-    const hasNearbyButton = (field) => {
-      for (let container = field, depth = 0; container && depth < 5; depth += 1) {
-        if (
-          [...container.querySelectorAll('button, [role="button"]')].some(isVisible)
-        ) return true;
-        container = container.parentElement;
-      }
-      return false;
-    };
-
-    const chatField = fields.some(
-      (field) =>
-        field.tagName === 'TEXTAREA' &&
-        field.getAttribute('role') !== 'combobox' &&
-        hasNearbyButton(field),
-    );
-    if (chatField) return true;
-
-    const isHomePage = /^\/(?:webhp)?\/?$/i.test(location.pathname);
-    return (
-      isHomePage &&
-      deepQueryAll('h1').some(isVisible) &&
-      fields.some((field) => field.tagName === 'TEXTAREA' && field.getAttribute('role') === 'combobox')
-    );
-  }
-
   function isAiModeActive() {
-    if (!isGoogleHost()) return false;
-    const params = new URLSearchParams(location.search);
-    return (
-      location.pathname.startsWith('/ai') ||
-      params.get('udm') === '50' ||
-      aiModeSelected ||
-      hasAiModeComposer()
-    );
+    return pageAdapter?.id === 'google-ai-mode' && pageAdapter.isActive(adapterContext());
   }
 
   function isGoogleSearchEntry() {
-    return isGoogleHost() && /^\/(?:search|webhp)?\/?$/i.test(location.pathname);
+    return pageAdapter?.id === 'google-ai-mode' && /^\/(?:search|webhp)?\/?$/i.test(location.pathname);
   }
 
   function isAttachablePage() {
-    return !isGoogleHost() || isAiModeActive();
+    return Boolean(pageAdapter?.isActive(adapterContext()));
   }
 
   function findComposer() {
-    for (const selector of COMPOSER_SELECTORS) {
-      let candidates = deepQueryAll(selector).filter(isVisible);
-      if (isGoogleSearchEntry() && !isAiModeActive()) {
-        candidates = candidates.filter((el) => composerHintScore(el) > 0);
-      }
-      if (candidates.length) {
-        candidates.sort(
-          (a, b) => composerHintScore(b) - composerHintScore(a) || areaOf(b) - areaOf(a),
-        );
-        return candidates[0];
-      }
-    }
-    return null;
+    return pageAdapter?.findComposer(adapterContext()) || null;
+  }
+
+  function adapterContext() {
+    return {
+      location,
+      document,
+      queryAll: deepQueryAll,
+      queryWithin: deepQueryWithin,
+      isVisible,
+      areaOf,
+      findMenuButtons,
+      onModeChange(active) {
+        if (state.ui) state.ui.host.style.display = active ? '' : 'none';
+        if (active) bootstrap();
+      },
+    };
+  }
+
+  function needsGeminiSignIn() {
+    return pageAdapter?.needsSignIn?.(adapterContext()) || false;
   }
 
   function captureChatTranscript() {
+    const adapterTranscript = pageAdapter?.captureTranscript?.(adapterContext());
+    if (adapterTranscript) return adapterTranscript;
+
     const selectorTiers = [
       'user-query, model-response, ms-chat-turn',
       '[data-message-author-role], [data-testid*="conversation-turn"], [data-testid*="chat-turn"]',
@@ -278,6 +223,8 @@
         .filter(Boolean);
       if (messages.length) return messages.join('\n\n');
     }
+
+    if (pageAdapter?.id === 'google-ai-mode') return '';
 
     if (isAttachablePage()) {
       const excluded = [
@@ -327,35 +274,10 @@
           .trim();
       }
 
-      if (isGoogleHost() && isAiModeActive()) {
-        const query = new URLSearchParams(location.search).get('q')?.trim();
-        const pageText = document.body?.innerText || '';
-        if (query && pageText) {
-          const escapedQuery = query
-            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-            .replace(/\s+/g, '\\s+');
-          const promptMatches = [...pageText.matchAll(new RegExp(escapedQuery, 'giu'))];
-          if (promptMatches.length >= 2) {
-            return pageText.slice(promptMatches[0].index).trim();
-          }
-        }
-      }
-
       const mainRegions = deepQueryAll('main, [role="main"]')
         .filter(isVisible)
         .sort((a, b) => areaOf(b) - areaOf(a));
-      if (isGoogleHost() && isAiModeActive()) {
-        const hasConversation = mainRegions.some((main) => {
-          const hasPrompt = deepQueryWithin(main, 'h2')
-            .filter(isVisible)
-            .some((heading) => (heading.innerText || '').trim());
-          const hasAnswer = deepQueryWithin(main, 'h3')
-            .filter(isVisible)
-            .some((heading) => (heading.innerText || '').trim());
-          return hasPrompt && hasAnswer;
-        });
-        if (!hasConversation) return '';
-      }
+      if (pageAdapter?.id === 'google-ai-mode') return '';
       const textRegions = mainRegions.length
         ? mainRegions
         : [document.body].filter(isVisible);
@@ -378,9 +300,9 @@
     return composer;
   }
 
-  function findFileInput(file, scope = document) {
+  function findFileInput(file, scope = document, skip = null) {
     const inputs = deepQueryWithin(scope, 'input[type="file"]').filter(
-      (el) => el.isConnected && !el.disabled,
+      (el) => el.isConnected && !el.disabled && !(skip && skip(el)),
     );
     if (!inputs.length) return null;
 
@@ -413,27 +335,25 @@
     return scored[0].el;
   }
 
-  const REVEAL_LABEL =
-    /(add files?|attach|upload|choose|הוספת קבצים|הוסף קבצים|צירוף|העלאת קובץ|בחירת קובץ)/i;
-
-  // Some surfaces (Google AI Mode) only build their file inputs once the
-  // "add files" menu is opened. Those buttons open a page menu, not the OS
-  // picker, so clicking them is safe.
-  function findRevealButtons(scope = document) {
+  function findMenuButtons(scope = document, anchor = null) {
     const selector =
       'button[aria-haspopup="menu"], button[aria-haspopup="dialog"], [role="button"][aria-haspopup="menu"], [role="button"][aria-haspopup="dialog"]';
-    return deepQueryWithin(scope, selector)
-      .filter(isVisible)
-      .filter((el) => {
-        const label = [el.getAttribute('aria-label'), el.getAttribute('title'), el.textContent]
-          .filter(Boolean)
-          .join(' ');
-        return REVEAL_LABEL.test(label);
-      });
+    const buttons = deepQueryWithin(scope, selector).filter(isVisible);
+    if (!anchor) return buttons;
+    const anchorRect = anchor.getBoundingClientRect();
+    return buttons.sort((a, b) => {
+      const distance = (button) => {
+        const rect = button.getBoundingClientRect();
+        const dx = Math.max(rect.left - anchorRect.right, anchorRect.left - rect.right, 0);
+        const dy = Math.max(rect.top - anchorRect.bottom, anchorRect.top - rect.bottom, 0);
+        return Math.hypot(dx, dy);
+      };
+      return distance(a) - distance(b);
+    });
   }
 
-  async function revealFileInput(file, scope = document) {
-    for (const button of findRevealButtons(scope).slice(0, 2)) {
+  async function revealFileInput(file, scope = document, anchor = null, skip = null) {
+    for (const button of findMenuButtons(scope, anchor).slice(0, 2)) {
       try {
         button.click();
       } catch {
@@ -442,7 +362,9 @@
       const deadline = Date.now() + 1600;
       while (Date.now() < deadline) {
         await sleep(200);
-        const input = findFileInput(file, scope);
+        const input =
+          findFileInput(file, scope, skip) ||
+          (scope !== document && findFileInput(file, document, skip));
         if (input) return input;
       }
     }
@@ -459,39 +381,6 @@
     }
     const rich = deepQueryAll('rich-textarea, [class*="text-input"], main').find(isVisible);
     return rich || document.body;
-  }
-
-  function watchGoogleMode() {
-    if (googleModeObserver || !isGoogleHost()) return;
-    observedAiMode = isAiModeActive();
-    document.addEventListener('click', (event) => {
-      const target = event.target instanceof Element
-        ? event.target.closest('[role="link"]')
-        : null;
-      if (!target || !target.closest('[role="search"]') || isAiModeActive()) return;
-      aiModeSelected = true;
-      observedAiMode = true;
-      if (state.ui) state.ui.host.style.display = '';
-      bootstrap();
-    }, true);
-    googleModeObserver = new MutationObserver(() => {
-      const active = isAiModeActive();
-      if (active === observedAiMode) return;
-      observedAiMode = active;
-      if (!active) {
-        if (state.ui) state.ui.host.style.display = 'none';
-        return;
-      }
-      if (state.ui) state.ui.host.style.display = '';
-      bootstrap();
-    });
-    googleModeObserver.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['placeholder', 'aria-label', 'data-placeholder'],
-      characterData: true,
-      childList: true,
-      subtree: true,
-    });
   }
 
   /* ---------------------------------------------------------------- *
@@ -646,7 +535,10 @@
   async function attachPayload(payload, settings) {
     if (!payload) return { ok: false, error: 'No context selected.' };
     if (!isAttachablePage()) {
-      return { ok: false, error: 'Open Google AI Mode before attaching a context.' };
+      return { ok: false, error: 'Open a supported AI chat before attaching a context.' };
+    }
+    if (needsGeminiSignIn()) {
+      return { ok: false, error: 'Sign in to Gemini before attaching contexts.' };
     }
     if (state.busy) return { ok: false, error: 'An attach is already running.' };
 
@@ -663,7 +555,7 @@
         return { ok: false, error };
       }
       if (!isAttachablePage()) {
-        return { ok: false, error: 'Open Google AI Mode before attaching a context.' };
+        return { ok: false, error: 'Open a supported AI chat before attaching a context.' };
       }
 
       const file = fileFromPayload(payload);
@@ -672,7 +564,14 @@
 
       const composer = findComposer();
       const scope = composerScope(composer);
-      const input = findFileInput(file, scope) || (await revealFileInput(file, scope));
+      // Google's top Search box can have its own file input. Prefer the
+      // composer's input (and reveal its upload menu) before any page-wide one.
+      const skipFileInput = (el) =>
+        Boolean(pageAdapter?.isTopSearchFileInput?.(el, composer));
+      const input =
+        findFileInput(file, scope, skipFileInput) ||
+        (await revealFileInput(file, scope, composer, skipFileInput)) ||
+        findFileInput(file, document, skipFileInput);
       if (input) {
         try {
           setInputFiles(input, [file]);
@@ -1173,6 +1072,10 @@
       sendResponse({ ok: true, active: isAiModeActive() });
       return false;
     }
+    if (message?.type === 'IS_GEMINI_SIGNED_IN') {
+      sendResponse({ ok: true, needsSignIn: needsGeminiSignIn() });
+      return false;
+    }
     if (message?.type === 'CAPTURE_CHAT') {
       if (!isAttachablePage()) {
         sendResponse({ ok: false, error: 'Open a supported AI chat before saving it.' });
@@ -1197,7 +1100,7 @@
       if (!isAttachablePage()) {
         sendResponse({
           ok: false,
-          error: 'Open Google AI Mode before attaching a context, or use Gemini or AI Studio.',
+          error: 'Open ChatGPT, Gemini, AI Studio, or Google AI Mode before attaching a context.',
         });
         return false;
       }
@@ -1251,11 +1154,14 @@
   }
 
   async function bootstrap() {
+    if (!pageAdapter) return;
+    if (!pageAdapterInstalled) {
+      pageAdapterInstalled = true;
+      pageAdapter.install?.(adapterContext());
+    }
     if (!isAttachablePage()) {
-      if (isGoogleSearchEntry()) watchGoogleMode();
       return;
     }
-    watchGoogleMode();
 
     try {
       const response = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });

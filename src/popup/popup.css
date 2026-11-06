@@ -232,12 +232,12 @@ button:disabled {
 }
 
 .secondary-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
 .secondary-row .secondary {
-  flex: 1;
   height: 36px;
   font-size: 12.5px;
   padding: 0 8px;

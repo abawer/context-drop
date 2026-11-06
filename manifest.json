@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Context Drop for Google AI",
-  "version": "1.1.1",
-  "description": "Keep your context files handy and load them into a new Gemini or AI Studio chat with one click.",
+  "name": "Context Drop for Google AI and GPT Chats",
+  "version": "1.1.2",
+  "description": "Save reusable context and attach it to ChatGPT, Gemini, Google AI Mode, and AI Studio.",
   "minimum_chrome_version": "116",
   "permissions": [
     "storage",
@@ -16,7 +16,9 @@
     "https://gemini.google.com/*",
     "https://aistudio.google.com/*",
     "https://www.google.com/*",
-    "https://www.google.co.il/*"
+    "https://www.google.co.il/*",
+    "https://chatgpt.com/*",
+    "https://*.chatgpt.com/*"
   ],
   "background": {
     "service_worker": "src/background.js",
@@ -42,9 +44,17 @@
         "https://gemini.google.com/*",
         "https://aistudio.google.com/*",
         "https://www.google.com/*",
-        "https://www.google.co.il/*"
+        "https://www.google.co.il/*",
+        "https://chatgpt.com/*",
+        "https://*.chatgpt.com/*"
       ],
       "js": [
+        "src/content/adapters/registry.js",
+        "src/content/adapters/shared.js",
+        "src/content/adapters/gemini.js",
+        "src/content/adapters/ai-studio.js",
+        "src/content/adapters/chatgpt.js",
+        "src/content/adapters/google-ai-mode.js",
         "src/content/content.js"
       ],
       "run_at": "document_idle"

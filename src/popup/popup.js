@@ -28,6 +28,7 @@ const els = {
   openPrimary: document.getElementById('open-primary'),
   openAlt1: document.getElementById('open-alt1'),
   openAlt2: document.getElementById('open-alt2'),
+  openAlt3: document.getElementById('open-alt3'),
   attachCurrent: document.getElementById('attach-current'),
   hint: document.getElementById('hint'),
   status: document.getElementById('status'),
@@ -70,6 +71,16 @@ async function loadState() {
       state.aiModeActive = response?.active === true;
     } catch {
       /* no content script on this tab */
+    }
+    if (state.tab.url?.startsWith('https://gemini.google.com/')) {
+      try {
+        const response = await chrome.tabs.sendMessage(state.tab.id, {
+          type: 'IS_GEMINI_SIGNED_IN',
+        });
+        state.geminiNeedsSignIn = response?.needsSignIn === true;
+      } catch {
+        /* Gemini page agent not ready */
+      }
     }
   }
 
@@ -161,14 +172,16 @@ function updateActions() {
   els.openPrimary.disabled = false;
   els.openAlt1.disabled = false;
   els.openAlt2.disabled = false;
-  els.attachCurrent.disabled = !hasContext || !supported || !hasTab;
+  els.attachCurrent.disabled = !hasContext || !supported || !hasTab || state.geminiNeedsSignIn;
 
   if (!hasContext) {
     els.hint.textContent = 'Open a chat without a context, or add/select contexts to attach.';
   } else if (!hasTab) {
     els.hint.textContent = 'Open a tab to attach the context to the current page.';
   } else if (!site) {
-    els.hint.textContent = 'To attach here, open Gemini, AI Studio or Google AI Mode.';
+    els.hint.textContent = 'To attach here, open ChatGPT, Gemini, AI Studio or Google AI Mode.';
+  } else if (state.geminiNeedsSignIn) {
+    els.hint.textContent = 'Sign in to Gemini before attaching contexts to this tab.';
   } else {
     els.hint.textContent = `This tab is ${site.label} — “Attach to current tab” keeps the current conversation.`;
   }
@@ -256,7 +269,7 @@ function configureDestinationButtons() {
   els.openPrimary.dataset.site = preferred;
   els.openPrimary.firstElementChild.textContent = `Open in ${SITES[preferred].label}`;
 
-  [els.openAlt1, els.openAlt2].forEach((button, index) => {
+  [els.openAlt1, els.openAlt2, els.openAlt3].forEach((button, index) => {
     const siteId = rest[index];
     button.dataset.site = siteId;
     button.textContent = SITES[siteId].label;

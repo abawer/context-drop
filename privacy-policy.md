@@ -2,7 +2,7 @@
 
 **Effective date: October 30, 2026**
 
-Context Drop for Google AI (the “Extension”) helps users store files and text locally and attach selected context to supported Google AI services. This policy explains what information the Extension handles and when it is shared.
+Context Drop for Google AI (the “Extension”) helps users store files and text locally and attach selected context to ChatGPT and supported Google AI services. This policy explains what information the Extension handles and when it is shared.
 
 ## Information the Extension Handles
 
@@ -15,7 +15,7 @@ Context Drop for Google AI (the “Extension”) helps users store files and tex
 
 Contexts and settings are stored in your browser profile using `chrome.storage.local` and IndexedDB. Pending attachment requests use `chrome.storage.session`. The Extension does not send this information to a server operated by the Extension developer and does not include analytics or advertising code.
 
-When you attach a context, its content is provided to the Google AI service open in the tab, either as a file attachment or, when text fallback is enabled and applicable, as text in the chat prompt. Auto-attach is off by default. If you enable it, the Extension attempts to attach all saved contexts when a supported chat page opens. Google may process information you submit under its own terms and privacy policy; the Extension developer does not control Google's handling of submitted content.
+When you attach a context, its content is provided to the ChatGPT or Google AI service open in the tab, either as a file attachment or, when text fallback is enabled and applicable, as text in the chat prompt. Auto-attach is off by default. If you enable it, the Extension attempts to attach all saved contexts when a supported chat page opens. OpenAI or Google may process information you submit under their own terms and privacy policies; the Extension developer does not control those services' handling of submitted content.
 
 The Extension does not otherwise sell or share your information with the Extension developer or other third parties.
 
@@ -23,11 +23,18 @@ The Extension does not otherwise sell or share your information with the Extensi
 
 You choose which contexts to attach when using the popup or page button. You can enable or disable auto-attach in Settings. You can edit or delete contexts, delete the entire library, and export or import your library from Settings. Exported files are saved through your browser's download flow and are under your control.
 
-Deleting a context in the Extension removes its saved library entry and stored file data from the Extension's local database. Content already submitted to a Google AI service is subject to that service's policies and cannot be recalled by the Extension.
+Deleting a context in the Extension removes its saved library entry and stored file data from the Extension's local database. Content already submitted to ChatGPT or a Google AI service is subject to that service's policies and cannot be recalled by the Extension.
 
 ## Permissions
 
-The Extension uses browser storage to maintain its local library and settings, tabs access to open supported services and communicate with the active tab, and scripting access to inject its packaged page script when needed for an attachment request. Host access is limited to Gemini, Google AI Studio, and Google Search domains where Google AI Mode is available.
+The Extension uses:
+
+- `activeTab` to read the selected text from the current page only after you choose the “Save selected text to Context Drop” context-menu action. This temporary access is used to save the text you selected and its source URL; it is not used to monitor browsing.
+- `contextMenus` to offer “Save selected text to Context Drop” on webpages and “Save this chat to Context Drop” on supported AI chat pages.
+- `notifications` to show whether a save initiated from a context-menu action succeeded or failed.
+- `storage` to maintain the local library and settings, `tabs` to open supported services and communicate with the active tab, and `scripting` to inject the Extension's packaged page script when needed for an attachment request.
+
+Host access is limited to ChatGPT, Gemini, Google AI Studio, and Google Search domains where Google AI Mode is available.
 
 ## Changes to This Policy
 

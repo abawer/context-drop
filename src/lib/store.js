@@ -31,9 +31,15 @@ export const SITES = {
     url: 'https://www.google.com/ai',
     host: 'www.google.com',
   },
+  chatgpt: {
+    id: 'chatgpt',
+    label: 'ChatGPT',
+    url: 'https://chatgpt.com/',
+    host: 'chatgpt.com',
+  },
 };
 
-export const SITE_ORDER = ['gemini', 'aistudio', 'aimode'];
+export const SITE_ORDER = ['gemini', 'aistudio', 'aimode', 'chatgpt'];
 
 export const DEFAULT_SETTINGS = {
   defaultSite: 'gemini',
@@ -388,6 +394,7 @@ export function siteForUrl(url = '') {
   const host = safeHost(url);
   if (host === SITES.gemini.host) return SITES.gemini;
   if (host === SITES.aistudio.host) return SITES.aistudio;
+  if (host === SITES.chatgpt.host || host.endsWith(`.${SITES.chatgpt.host}`)) return SITES.chatgpt;
   if (isAiModeUrl(url)) return SITES.aimode;
   return null;
 }

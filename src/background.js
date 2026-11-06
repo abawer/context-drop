@@ -12,7 +12,15 @@ import {
 const PENDING_PREFIX = 'pending:';
 const PENDING_TTL_MS = 2 * 60 * 1000;
 const LAST_CONTEXT_KEY = 'lastContextId';
-const CONTENT_FILE = 'src/content/content.js';
+const CONTENT_FILES = [
+  'src/content/adapters/registry.js',
+  'src/content/adapters/shared.js',
+  'src/content/adapters/gemini.js',
+  'src/content/adapters/ai-studio.js',
+  'src/content/adapters/chatgpt.js',
+  'src/content/adapters/google-ai-mode.js',
+  'src/content/content.js',
+];
 const BADGE_OK_COLOR = '#188038';
 const BADGE_ERR_COLOR = '#c5221f';
 const BADGE_BUSY_COLOR = '#1a73e8';
@@ -23,6 +31,8 @@ const CHAT_PAGE_PATTERNS = [
   'https://aistudio.google.com/*',
   'https://www.google.com/*',
   'https://www.google.co.il/*',
+  'https://chatgpt.com/*',
+  'https://*.chatgpt.com/*',
 ];
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -244,7 +254,7 @@ async function setBadge(tabId, text, color) {
 async function injectContentScript(tabId) {
   await chrome.scripting.executeScript({
     target: { tabId },
-    files: [CONTENT_FILE],
+    files: CONTENT_FILES,
   });
 }
 
