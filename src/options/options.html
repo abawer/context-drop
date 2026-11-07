@@ -89,14 +89,23 @@
             </span>
           </label>
 
-          <label class="switch">
-            <input id="auto-attach" type="checkbox" />
-            <span>
-              <strong>Auto-attach when a chat opens</strong>
-              <small>Automatically attach all saved contexts on ChatGPT, Gemini, AI Studio, or AI Mode.</small>
-            </span>
+        <div class="card settings-card">
+          <h3>Auto-attach on chat open</h3>
+          <p class="muted">
+            Choose which saved contexts are automatically attached when a supported chat page opens.
+          </p>
+          <label class="field">
+            <span>Mode</span>
+            <select id="auto-attach-mode">
+              <option value="none">Off</option>
+              <option value="all">All contexts</option>
+              <option value="binders">Specific binders</option>
+              <option value="files">Specific files</option>
+            </select>
           </label>
-
+          <div id="auto-attach-targets" class="target-list"></div>
+          <p class="muted" id="auto-attach-count"></p>
+        </div>
           <label class="field">
             <span>Text prefix</span>
             <input id="text-prefix" type="text" maxlength="200" />

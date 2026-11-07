@@ -1,11 +1,13 @@
 import {
   SITES,
   addTextContext,
+  getBinders,
   getContext,
   getContexts,
   getSettings,
   payloadFor,
   removeContext,
+  setContextBinder,
   updateTextContext,
 } from './lib/store.js';
 
@@ -37,7 +39,7 @@ const CHAT_PAGE_PATTERNS = [
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function showSaveFeedback(tab, result) {
+function showSaveFeedback(tab, result, { contextId, binders } = {}) {
   if (tab?.id) {
     setBadge(tab.id, result.ok ? '✓' : '!', result.ok ? BADGE_OK_COLOR : BADGE_ERR_COLOR);
     chrome.action.setTitle({
@@ -47,19 +49,75 @@ function showSaveFeedback(tab, result) {
         : `Context Drop - ${result.error || 'save failed'}`,
     }).catch(() => {});
 
+    const message = result.ok ? `${result.name} saved to Context Drop` : result.error || 'Could not save';
+
     chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      args: [result.ok ? `${result.name} saved to Context Drop` : result.error || 'Could not save'],
-      func: (message) => {
+      args: [message, contextId || null, binders || []],
+      func: (message, contextId, binders) => {
         document.getElementById('context-drop-save-notice')?.remove();
         const notice = document.createElement('div');
         notice.id = 'context-drop-save-notice';
         notice.setAttribute('role', 'status');
         notice.setAttribute('aria-live', 'polite');
-        notice.textContent = message;
         notice.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:2147483647;max-width:min(420px,calc(100vw - 32px));padding:12px 16px;border-radius:8px;background:#202124;color:#fff;font:14px/1.4 system-ui,sans-serif;box-shadow:0 4px 16px #0005;';
+
+        const msg = document.createElement('div');
+        msg.textContent = message;
+        msg.style.marginBottom = '8px';
+
+        if (contextId && binders) {
+          const label = document.createElement('label');
+          label.textContent = 'File under: ';
+          label.style.fontSize = '12px';
+          label.style.display = 'block';
+          label.style.marginBottom = '4px';
+
+          const select = document.createElement('select');
+          select.style.width = '100%';
+          select.style.padding = '4px';
+          select.style.fontSize = '12px';
+          select.style.boxSizing = 'border-box';
+
+          const unfiled = document.createElement('option');
+          unfiled.value = '';
+          unfiled.textContent = 'Unfiled';
+          unfiled.selected = true;
+          select.appendChild(unfiled);
+
+          for (const b of binders) {
+            const opt = document.createElement('option');
+            opt.value = b.id;
+            opt.textContent = b.name;
+            select.appendChild(opt);
+          }
+
+          select.addEventListener('change', async () => {
+            const binderId = select.value || null;
+            try {
+              const response = await chrome.runtime.sendMessage({
+                type: 'SET_CONTEXT_BINDER',
+                contextId,
+                binderId,
+              });
+              const labelText = select.options[select.selectedIndex].text;
+              if (response?.ok) {
+                msg.textContent = `Saved • moved to “${labelText}”`;
+              } else {
+                msg.textContent = `Saved • could not move: ${response?.error || 'unknown error'}`;
+              }
+            } catch {
+              msg.textContent = 'Saved • move failed';
+            }
+          });
+
+          notice.append(msg, label, select);
+        } else {
+          notice.append(msg);
+        }
+
         document.documentElement.appendChild(notice);
-        setTimeout(() => notice.remove(), 5000);
+        setTimeout(() => notice.remove(), 8000);
       },
     }).catch(() => {});
   }
@@ -169,8 +227,9 @@ async function saveSelectedText(info, tab) {
       name: `Web text - ${sourceTitle || 'Web page'}`,
       note: 'Selected web text',
     });
-    const result = { ok: true, name: context.name };
-    showSaveFeedback(tab, result);
+    const binders = await getBinders();
+    const result = { ok: true, name: context.name, contextId: context.id, binders };
+    showSaveFeedback(tab, result, { contextId: context.id, binders });
   } catch (error) {
     showSaveFeedback(tab, { ok: false, error: error?.message || 'Could not save selected text.' });
   }
@@ -388,11 +447,20 @@ const handlers = {
 
   async GET_AUTO_CONTEXT() {
     const settings = await getSettings();
-    if (!settings.autoAttachOnChatOpen) return { ok: true, payloads: [], settings };
+    const autoAttach = settings.autoAttach || { mode: 'none', ids: [] };
+    if (autoAttach.mode === 'none') return { ok: true, payloads: [], settings };
 
     const contexts = await getContexts();
+    let targets = contexts;
+    if (autoAttach.mode === 'binders') {
+      targets = contexts.filter((c) => autoAttach.ids.includes(c.binderId));
+    } else if (autoAttach.mode === 'files') {
+      targets = contexts.filter((c) => autoAttach.ids.includes(c.id));
+    }
+    // 'all' -> all contexts
+
     const payloads = (await Promise.all(
-      contexts.map((context) => payloadFor(context.id).catch(() => null)),
+      targets.map((context) => payloadFor(context.id).catch(() => null)),
     )).filter(Boolean);
     return { ok: true, payloads, settings };
   },
@@ -427,6 +495,13 @@ const handlers = {
     const context = await getContext(message.contextId);
     if (!context) return { ok: false, error: 'Context not found.' };
     await removeContext(context.id);
+    return { ok: true };
+  },
+
+  async SET_CONTEXT_BINDER(message) {
+    const context = await getContext(message.contextId);
+    if (!context) return { ok: false, error: 'Context not found.' };
+    await setContextBinder(message.contextId, message.binderId);
     return { ok: true };
   },
 

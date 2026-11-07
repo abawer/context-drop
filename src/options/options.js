@@ -35,7 +35,9 @@ const els = {
   version: document.getElementById('version'),
   defaultSite: document.getElementById('default-site'),
   fallback: document.getElementById('fallback'),
-  autoAttach: document.getElementById('auto-attach'),
+  autoAttach: document.getElementById('auto-attach-mode'),
+  autoAttachTargets: document.getElementById('auto-attach-targets'),
+  autoAttachCount: document.getElementById('auto-attach-count'),
   textPrefix: document.getElementById('text-prefix'),
   floating: document.getElementById('floating'),
   timeout: document.getElementById('timeout'),
@@ -321,10 +323,11 @@ function renderContexts() {
 function renderSettings() {
   els.defaultSite.value = settings.defaultSite;
   els.fallback.checked = Boolean(settings.fallbackToText);
-  els.autoAttach.checked = Boolean(settings.autoAttachOnChatOpen);
+  els.autoAttach.value = settings.autoAttach?.mode || 'none';
   els.textPrefix.value = settings.textPrefix || '';
   els.floating.checked = Boolean(settings.showFloatingButton);
   els.timeout.value = Math.round((settings.attachTimeoutMs || 20000) / 1000);
+  renderAutoAttach();
 }
 
 async function refresh() {
@@ -416,6 +419,68 @@ function renderBinders() {
   }
 }
 
+function renderAutoAttach() {
+  const mode = settings.autoAttach?.mode || 'none';
+  const ids = new Set(settings.autoAttach?.ids || []);
+  els.autoAttachTargets.textContent = '';
+
+  if (mode === 'none' || mode === 'all') {
+    els.autoAttachCount.textContent =
+      mode === 'all'
+        ? `Will auto-attach all ${contexts.length} context(s).`
+        : 'Auto-attach is off.';
+    return;
+  }
+
+  let targets;
+  let label;
+  if (mode === 'binders') {
+    targets = binders;
+    label = 'binder';
+  } else {
+    targets = contexts;
+    label = 'context';
+  }
+
+  let selected = 0;
+  for (const target of targets) {
+    const item = document.createElement('div');
+    item.className = 'target-item';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = ids.has(target.id);
+    input.addEventListener('change', async () => {
+      const next = new Set(ids);
+      if (input.checked) next.add(target.id);
+      else next.delete(target.id);
+      settings = await saveSettings({
+        autoAttach: { mode, ids: [...next] },
+      });
+      renderAutoAttach();
+    });
+
+    const lbl = document.createElement('label');
+    const name = document.createElement('span');
+    name.textContent = target.name;
+    const meta = document.createElement('small');
+    if (mode === 'binders') {
+      const count = contexts.filter((c) => c.binderId === target.id).length;
+      meta.textContent = `${count} context(s)`;
+    } else {
+      const binder = binders.find((b) => b.id === target.binderId);
+      meta.textContent = binder ? `Binder: ${binder.name}` : 'Unfiled';
+      meta.textContent += ` · ${target.kind === 'text' ? 'Text' : 'File'}`;
+    }
+    lbl.append(name, meta);
+    item.append(input, lbl);
+    els.autoAttachTargets.appendChild(item);
+    if (input.checked) selected += 1;
+  }
+
+  els.autoAttachCount.textContent = `Will auto-attach ${selected} ${label}(s).`;
+}
+
 async function createBinder() {
   const name = els.binderName.value;
   if (!name.trim()) {
@@ -498,13 +563,16 @@ function wireSettings() {
   });
 
   els.autoAttach.addEventListener('change', async () => {
-    settings = await saveSettings({ autoAttachOnChatOpen: els.autoAttach.checked });
-    toast(
-      settings.autoAttachOnChatOpen
-        ? 'The last selected context will attach when a chat opens'
-        : 'Automatic attachment turned off',
-      'ok',
-    );
+    const mode = els.autoAttach.value;
+    const currentIds = settings.autoAttach?.ids || [];
+    let nextIds = currentIds;
+    if (mode === 'binders' || mode === 'files') {
+      // Keep existing ids if they are still valid for the new mode; otherwise start empty.
+      nextIds = currentIds;
+    }
+    settings = await saveSettings({ autoAttach: { mode, ids: nextIds } });
+    renderAutoAttach();
+    toast(`Auto-attach: ${mode === 'none' ? 'off' : mode}`, 'ok');
   });
 
   els.textPrefix.addEventListener('change', async () => {

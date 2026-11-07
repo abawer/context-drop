@@ -48,7 +48,7 @@ export const SITE_ORDER = ['gemini', 'aistudio', 'aimode', 'chatgpt'];
 
 export const DEFAULT_SETTINGS = {
   defaultSite: 'gemini',
-  autoAttachOnChatOpen: false,
+  autoAttach: { mode: 'none', ids: [] },
   attachTimeoutMs: 20000,
   fallbackToText: true,
   textPrefix: 'Context for this conversation:\n\n',
@@ -155,7 +155,29 @@ async function upsertContext(meta) {
 
 export async function getSettings() {
   const stored = await chrome.storage.local.get(SETTINGS_KEY);
-  return { ...DEFAULT_SETTINGS, ...(stored[SETTINGS_KEY] || {}) };
+  const raw = stored[SETTINGS_KEY] || {};
+  let next = { ...DEFAULT_SETTINGS, ...raw };
+
+  // Migrate legacy autoAttachOnChatOpen boolean -> autoAttach matrix.
+  if (Object.prototype.hasOwnProperty.call(raw, 'autoAttachOnChatOpen')) {
+    next.autoAttach = raw.autoAttachOnChatOpen
+      ? { mode: 'all', ids: [] }
+      : { mode: 'none', ids: [] };
+    delete next.autoAttachOnChatOpen;
+  }
+
+  // Ensure autoAttach has a valid shape.
+  if (!next.autoAttach || typeof next.autoAttach !== 'object') {
+    next.autoAttach = { mode: 'none', ids: [] };
+  }
+  if (!Array.isArray(next.autoAttach.ids)) {
+    next.autoAttach.ids = [];
+  }
+  if (!['none', 'all', 'binders', 'files'].includes(next.autoAttach.mode)) {
+    next.autoAttach.mode = 'none';
+  }
+
+  return next;
 }
 
 export async function saveSettings(patch) {

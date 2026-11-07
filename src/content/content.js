@@ -1138,7 +1138,7 @@
   }
 
   async function autoAttachContexts() {
-    if (!state.settings.autoAttachOnChatOpen || !isAttachablePage()) return;
+    if (!state.settings.autoAttach?.mode || state.settings.autoAttach.mode === 'none' || !isAttachablePage()) return;
 
     try {
       const response = await chrome.runtime.sendMessage({ type: 'GET_AUTO_CONTEXT' });
