@@ -616,8 +616,32 @@ textarea {
   color: var(--muted);
 }
 
+.binder-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  align-items: center;
+}
+
+.binder-actions .btn {
+  font-size: 11.5px;
+  padding: 4px 9px;
+  height: auto;
+}
+
 .binder-header .count {
   font-size: 12px;
   color: var(--muted);
   margin-left: auto;
+}
+
+.binder-list {
+  max-height: 240px;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+}
+
+.binders-create {
+  margin-bottom: 16px;
 }

@@ -482,6 +482,20 @@ const handlers = {
     };
   },
 
+  async LIST_BINDERS() {
+    return { ok: true, binders: await getBinders() };
+  },
+
+  async GET_BINDER_PAYLOADS(message) {
+    const settings = await getSettings();
+    const contexts = await getContexts();
+    const targets = contexts.filter((c) => c.binderId === message.binderId);
+    const payloads = (await Promise.all(
+      targets.map((context) => payloadFor(context.id).catch(() => null)),
+    )).filter(Boolean);
+    return { ok: true, payloads, settings };
+  },
+
   async UPDATE_TEXT_CONTEXT(message) {
     const context = await getContext(message.contextId);
     if (!context || context.kind !== 'text') {
