@@ -1,18 +1,24 @@
 import {
   MAX_FILE_BYTES,
   SITES,
+  addBinder,
+  BINDER_NAME_MAX_LEN,
   addFileContext,
   addTextContext,
   formatBytes,
   formatDateTime,
+  getBinders,
   getContextBlob,
   getContexts,
   getSettings,
   isTextualMime,
   readContextText,
+  removeBinder,
   removeContext,
+  renameBinder,
   renameContext,
   saveSettings,
+  setContextBinder,
   updateTextContext,
 } from '../lib/store.js';
 
@@ -22,6 +28,8 @@ const els = {
   textName: document.getElementById('text-name'),
   textBody: document.getElementById('text-body'),
   saveText: document.getElementById('save-text'),
+  textBinder: document.getElementById('text-binder'),
+  fileBinder: document.getElementById('file-binder'),
   contexts: document.getElementById('contexts'),
   count: document.getElementById('count'),
   version: document.getElementById('version'),
@@ -39,9 +47,13 @@ const els = {
   dialog: document.getElementById('edit-dialog'),
   editTitle: document.getElementById('edit-title'),
   editBody: document.getElementById('edit-body'),
+  binderName: document.getElementById('binder-name'),
+  addBinderBtn: document.getElementById('add-binder'),
+  bindersList: document.getElementById('binders-list'),
 };
 
 let contexts = [];
+let binders = [];
 let settings = null;
 let editingId = null;
 let toastTimer = null;
@@ -98,7 +110,9 @@ function contextCard(context) {
   const meta = document.createElement('div');
   meta.className = 'meta';
   const savedAt = formatDateTime(context.createdAt);
+  const binder = binders.find((b) => b.id === context.binderId);
   const parts = [
+    binder ? `Binder: ${binder.name}` : 'Unfiled',
     context.kind === 'text' ? 'Pasted text' : context.fileName,
     formatBytes(context.size),
     context.mime,
@@ -111,6 +125,64 @@ function contextCard(context) {
 
   const actions = document.createElement('div');
   actions.className = 'actions';
+
+  const binderPicker = document.createElement('select');
+  binderPicker.className = 'binder-picker';
+  binderPicker.title = 'Move this context to a binder';
+  const currentlyUnfiled = !context.binderId;
+  if (currentlyUnfiled) {
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Unfiled (current)';
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    binderPicker.appendChild(placeholder);
+  } else {
+    const unfiled = document.createElement('option');
+    unfiled.value = '';
+    unfiled.textContent = 'Move to Unfiled';
+    binderPicker.appendChild(unfiled);
+  }
+  for (const b of binders) {
+    if (b.id === context.binderId) continue;
+    const opt = document.createElement('option');
+    opt.value = b.id;
+    opt.textContent = b.name;
+    binderPicker.appendChild(opt);
+  }
+  const newOpt = document.createElement('option');
+  newOpt.value = '__new__';
+  newOpt.textContent = '+ New binder';
+  binderPicker.appendChild(newOpt);
+  binderPicker.addEventListener('change', async () => {
+    const value = binderPicker.value;
+    if (value === '__new__') {
+      const name = window.prompt('New binder name');
+      if (name == null) {
+        binderPicker.value = '';
+        return;
+      }
+      const trimmed = String(name || '').trim();
+      if (!trimmed) {
+        toast('Binder name cannot be empty', 'error');
+        binderPicker.value = '';
+        return;
+      }
+      try {
+        const binder = await addBinder(trimmed);
+        await setContextBinder(context.id, binder.id);
+        await refresh();
+        toast('Moved to new binder', 'ok');
+      } catch (error) {
+        toast(error?.message || 'Could not create binder', 'error');
+        binderPicker.value = '';
+      }
+      return;
+    }
+    await setContextBinder(context.id, value || null);
+    await refresh();
+    toast('Moved context', 'ok');
+  });
 
   const attachHint = document.createElement('button');
   attachHint.type = 'button';
@@ -184,7 +256,7 @@ function contextCard(context) {
     toast('Deleted', 'ok');
   });
 
-  actions.append(attachHint, edit, download, remove);
+  actions.append(binderPicker, attachHint, edit, download, remove);
   card.append(badge, info, actions);
   return card;
 }
@@ -204,9 +276,46 @@ function renderContexts() {
     return;
   }
 
-  for (const context of contexts) {
-    els.contexts.appendChild(contextCard(context));
+  const unfiled = contexts.filter((c) => !c.binderId);
+  const filed = contexts.filter((c) => c.binderId);
+
+  if (unfiled.length) {
+    const section = document.createElement('div');
+    section.className = 'binder-section';
+    const header = document.createElement('div');
+    header.className = 'binder-header';
+    const title = document.createElement('h3');
+    title.textContent = 'Unfiled';
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = `${unfiled.length}`;
+    header.append(title, count);
+    section.append(header);
+    for (const context of unfiled) {
+      section.appendChild(contextCard(context));
+    }
+    els.contexts.appendChild(section);
   }
+
+  binders.forEach((binder) => {
+    const items = filed.filter((c) => c.binderId === binder.id);
+    if (!items.length) return;
+    const section = document.createElement('div');
+    section.className = 'binder-section';
+    const header = document.createElement('div');
+    header.className = 'binder-header';
+    const title = document.createElement('h3');
+    title.textContent = binder.name;
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = `${items.length}`;
+    header.append(title, count);
+    section.append(header);
+    for (const context of items) {
+      section.appendChild(contextCard(context));
+    }
+    els.contexts.appendChild(section);
+  });
 }
 
 function renderSettings() {
@@ -219,9 +328,109 @@ function renderSettings() {
 }
 
 async function refresh() {
-  [contexts, settings] = await Promise.all([getContexts(), getSettings()]);
+  [contexts, binders, settings] = await Promise.all([
+    getContexts(),
+    getBinders(),
+    getSettings(),
+  ]);
   renderContexts();
   renderSettings();
+  renderBinders();
+  renderBinderPickers();
+}
+
+/* ------------------------------------------------------------------ *
+ * Binders UI
+ * ------------------------------------------------------------------ */
+
+function renderBinderPickers() {
+  [els.textBinder, els.fileBinder].forEach((select) => {
+    select.textContent = '';
+    const unfiled = document.createElement('option');
+    unfiled.value = '';
+    unfiled.textContent = 'Unfiled';
+    select.appendChild(unfiled);
+    binders.forEach((binder) => {
+      const opt = document.createElement('option');
+      opt.value = binder.id;
+      opt.textContent = binder.name;
+      select.appendChild(opt);
+    });
+  });
+}
+
+function renderBinders() {
+  els.bindersList.textContent = '';
+  if (!binders.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'No binders yet. Create one to group contexts by topic.';
+    els.bindersList.appendChild(empty);
+    return;
+  }
+  for (const binder of binders) {
+    const item = document.createElement('div');
+    item.className = 'binder-item';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = binder.name;
+    input.maxLength = BINDER_NAME_MAX_LEN;
+    input.addEventListener('change', async () => {
+      try {
+        await renameBinder(binder.id, input.value);
+        await refresh();
+        toast('Binder renamed', 'ok');
+      } catch (error) {
+        toast(error?.message || 'Could not rename binder', 'error');
+        await refresh();
+      }
+    });
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'btn danger';
+    del.textContent = 'Delete';
+    del.title = 'Delete this binder';
+    del.addEventListener('click', async () => {
+      const contexts = await getContexts({ binderId: binder.id });
+      if (contexts.length) {
+        const ok = window.confirm(
+          `“${binder.name}” contains ${contexts.length} context(s). Delete the binder and move them to Unfiled?`,
+        );
+        if (!ok) return;
+      } else if (!window.confirm(`Delete binder “${binder.name}”?`)) {
+        return;
+      }
+      try {
+        await removeBinder(binder.id);
+        await refresh();
+        toast('Binder deleted', 'ok');
+      } catch (error) {
+        toast(error?.message || 'Could not delete binder', 'error');
+      }
+    });
+
+    item.append(input, del);
+    els.bindersList.appendChild(item);
+  }
+}
+
+async function createBinder() {
+  const name = els.binderName.value;
+  if (!name.trim()) {
+    els.binderName.focus();
+    return;
+  }
+  try {
+    await addBinder(name);
+    els.binderName.value = '';
+    await refresh();
+    toast('Binder created', 'ok');
+  } catch (error) {
+    toast(error?.message || 'Could not create binder', 'error');
+    els.binderName.focus();
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -241,7 +450,7 @@ async function addFiles(fileList) {
         problems.push(`${file.name}: too large (${formatBytes(file.size)})`);
         continue;
       }
-      await addFileContext(file);
+      await addFileContext(file, { binderId: els.fileBinder.value || null });
       added += 1;
     } catch (error) {
       problems.push(`${file.name}: ${error?.message || 'failed'}`);
@@ -261,7 +470,10 @@ async function saveTextContext() {
     return;
   }
   try {
-    await addTextContext(text, { name: els.textName.value || 'Text context' });
+    await addTextContext(text, {
+      name: els.textName.value || 'Text context',
+      binderId: els.textBinder.value || null,
+    });
     els.textBody.value = '';
     els.textName.value = '';
     await refresh();
@@ -327,6 +539,7 @@ async function exportData() {
     version: 1,
     exportedAt: new Date().toISOString(),
     settings,
+    binders,
     contexts: [],
   };
 
@@ -359,6 +572,19 @@ async function importData(file) {
       throw new Error('This is not a Context Drop export');
     }
 
+    // Restore binders, reusing existing same-named binders so re-imports don't duplicate.
+    const existingBinders = await getBinders();
+    const binderIdMap = {};
+    for (const binder of parsed.binders || []) {
+      const existing = existingBinders.find((b) => b.name === binder.name);
+      if (existing) {
+        binderIdMap[binder.id] = existing.id;
+      } else {
+        const created = await addBinder(binder.name);
+        binderIdMap[binder.id] = created.id;
+      }
+    }
+
     let imported = 0;
     for (const entry of parsed.contexts) {
       if (!entry?.base64) continue;
@@ -367,6 +593,7 @@ async function importData(file) {
         await addTextContext(new TextDecoder().decode(bytes), {
           name: entry.name,
           fileName: entry.fileName,
+          binderId: binderIdMap[entry.binderId] || null,
         });
       } else {
         const blob = new Blob([bytes], {
@@ -376,7 +603,7 @@ async function importData(file) {
           new File([blob], entry.fileName || 'context.txt', {
             type: entry.mime || 'application/octet-stream',
           }),
-          { name: entry.name },
+          { name: entry.name, binderId: binderIdMap[entry.binderId] || null },
         );
       }
       imported += 1;
@@ -469,6 +696,7 @@ async function init() {
   els.version.textContent = `v${chrome.runtime.getManifest().version}`;
 
   els.saveText.addEventListener('click', saveTextContext);
+  els.addBinderBtn.addEventListener('click', createBinder);
   els.exportBtn.addEventListener('click', exportData);
   els.importBtn.addEventListener('click', () => els.importInput.click());
   els.importInput.addEventListener('change', async () => {
@@ -487,7 +715,7 @@ async function init() {
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'local' && changes.contexts) refresh();
+  if (areaName === 'local' && (changes.contexts || changes.binders)) refresh();
 });
 
 init();

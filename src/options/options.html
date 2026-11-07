@@ -43,12 +43,23 @@
                 <input id="text-name" type="text" placeholder="Product notes" maxlength="120" />
               </label>
               <label class="field">
+                <span>Binder (optional)</span>
+                <select id="text-binder" class="binder-picker"></select>
+              </label>
+              <label class="field">
                 <span>Text</span>
                 <textarea id="text-body" rows="6" placeholder="Paste the context you want attached to your chats…"></textarea>
               </label>
               <button id="save-text" class="btn primary" type="button">Save text context</button>
             </div>
           </details>
+
+          <label class="field">
+            <span>Binder for new files</span>
+            <select id="file-binder" class="binder-picker"></select>
+            <small>Contexts added from this page are filed under the selected binder, or “Unfiled” when none is chosen.</small>
+          </label>
+
         </div>
 
         <div id="contexts" class="contexts"></div>
@@ -133,6 +144,23 @@
             Sites change often. If attaching stops working, reload the tab once so the extension
             picks up the latest page structure.
           </p>
+        </div>
+
+        <div class="card settings-card">
+          <div class="section-head">
+            <h2 id="binders-title">Binders</h2>
+          </div>
+          <p class="muted">
+            Binders group your contexts by topic. Create a binder, then file contexts under it.
+            Right-click saved chats and web text start unfiled; move them into a binder from their
+            context card below.
+          </p>
+          <label class="field">
+            <span>New binder name</span>
+            <input id="binder-name" type="text" placeholder="e.g. Project X" maxlength="60" />
+            <button id="add-binder" class="btn primary" type="button">Create</button>
+          </label>
+          <div id="binders-list" class="binders-list"></div>
         </div>
       </section>
     </main>

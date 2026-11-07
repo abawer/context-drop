@@ -81,6 +81,36 @@ main {
   margin-bottom: 8px;
 }
 
+.field.small {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.field.small > span {
+  font-weight: 600;
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.binder-filter {
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 8px;
+  outline: none;
+}
+
+.binder-filter:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 h2 {
   margin: 0;
   font-size: 11px;

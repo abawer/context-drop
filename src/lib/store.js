@@ -11,6 +11,11 @@ const BLOBS = 'blobs';
 
 const CONTEXTS_KEY = 'contexts';
 const SETTINGS_KEY = 'settings';
+const BINDERS_KEY = 'binders';
+
+const BINDER_NAME_MAX_LEN = 60;
+
+export { BINDER_NAME_MAX_LEN };
 
 export const SITES = {
   gemini: {
@@ -116,10 +121,12 @@ async function deleteBlob(id) {
  * Metadata (chrome.storage.local)
  * ------------------------------------------------------------------ */
 
-export async function getContexts() {
+export async function getContexts(filter = {}) {
   const stored = await chrome.storage.local.get(CONTEXTS_KEY);
   const list = stored[CONTEXTS_KEY];
-  return Array.isArray(list) ? list : [];
+  const contexts = Array.isArray(list) ? list : [];
+  if (filter.binderId === undefined) return contexts;
+  return contexts.filter((c) => c.binderId === filter.binderId);
 }
 
 async function setContexts(list) {
@@ -129,6 +136,12 @@ async function setContexts(list) {
 export async function getContext(id) {
   const list = await getContexts();
   return list.find((c) => c.id === id) || null;
+}
+
+export async function setContextBinder(contextId, binderId) {
+  const existing = await getContext(contextId);
+  if (!existing) throw new Error('Context not found');
+  return upsertContext({ ...existing, binderId });
 }
 
 async function upsertContext(meta) {
@@ -149,6 +162,86 @@ export async function saveSettings(patch) {
   const next = { ...(await getSettings()), ...patch };
   await chrome.storage.local.set({ [SETTINGS_KEY]: next });
   return next;
+}
+
+/* ------------------------------------------------------------------ *
+ * Binders (topics)
+ * ------------------------------------------------------------------ */
+
+export async function getBinders() {
+  const stored = await chrome.storage.local.get(BINDERS_KEY);
+  const list = stored[BINDERS_KEY];
+  return Array.isArray(list) ? list : [];
+}
+
+async function setBinders(list) {
+  await chrome.storage.local.set({ [BINDERS_KEY]: list });
+}
+
+export async function addBinder(name) {
+  const clean = String(name || '').trim();
+  if (!clean) throw new Error('The binder name cannot be empty');
+  if (clean.length > BINDER_NAME_MAX_LEN) {
+    throw new Error(
+      `The binder name is too long (${clean.length} characters). The limit is ${BINDER_NAME_MAX_LEN}.`,
+    );
+  }
+
+  const binders = await getBinders();
+  const exists = binders.some((b) => b.name.toLowerCase() === clean.toLowerCase());
+  if (exists) throw new Error(`A binder named “${clean}” already exists.`);
+
+  const binder = {
+    id: crypto.randomUUID(),
+    name: clean,
+    createdAt: Date.now(),
+  };
+  binders.push(binder);
+  await setBinders(binders);
+  return binder;
+}
+
+export async function renameBinder(id, name) {
+  const clean = String(name || '').trim();
+  if (!clean) throw new Error('The binder name cannot be empty');
+  if (clean.length > BINDER_NAME_MAX_LEN) {
+    throw new Error(
+      `The binder name is too long (${clean.length} characters). The limit is ${BINDER_NAME_MAX_LEN}.`,
+    );
+  }
+
+  const binders = await getBinders();
+  const index = binders.findIndex((b) => b.id === id);
+  if (index === -1) throw new Error('Binder not found');
+
+  const exists = binders.some(
+    (b) => b.id !== id && b.name.toLowerCase() === clean.toLowerCase(),
+  );
+  if (exists) throw new Error(`A binder named “${clean}” already exists.`);
+
+  binders[index] = { ...binders[index], name: clean };
+  await setBinders(binders);
+  return binders[index];
+}
+
+export async function removeBinder(id) {
+  const binders = await getBinders();
+  const index = binders.findIndex((b) => b.id === id);
+  if (index === -1) throw new Error('Binder not found');
+
+  const contexts = await getContexts();
+  const boundContexts = contexts.filter((c) => c.binderId === id);
+  binders.splice(index, 1);
+  await setBinders(binders);
+
+  if (boundContexts.length) {
+    const nextContexts = contexts.map((c) =>
+      c.binderId === id ? { ...c, binderId: null } : c,
+    );
+    await setContexts(nextContexts);
+  }
+
+  return { movedToUnfiled: boundContexts.length };
 }
 
 /* ------------------------------------------------------------------ *
@@ -243,6 +336,7 @@ export async function addFileContext(file, overrides = {}) {
     mime,
     size: data.byteLength,
     note: overrides.note || '',
+    binderId: overrides.binderId || null,
     createdAt: now,
     updatedAt: now,
   });
@@ -276,6 +370,7 @@ export async function addTextContext(text, overrides = {}) {
     mime: 'text/plain',
     size: bytes.byteLength,
     note: overrides.note || '',
+    binderId: overrides.binderId || null,
     createdAt: now,
     updatedAt: now,
   });

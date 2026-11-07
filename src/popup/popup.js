@@ -3,6 +3,7 @@ import {
   SITE_ORDER,
   formatBytes,
   formatDateTime,
+  getBinders,
   getContexts,
   getSettings,
   isSupportedUrl,
@@ -15,14 +16,17 @@ const SELECTED_CONTEXTS_KEY = 'selectedContextIds';
 
 const state = {
   contexts: [],
+  binders: [],
   selectedIds: [],
   settings: null,
   tab: null,
   aiModeActive: false,
+  binderFilter: null,
 };
 
 const els = {
   list: document.getElementById('list'),
+  binderFilter: document.getElementById('binder-filter'),
   add: document.getElementById('add'),
   manage: document.getElementById('manage'),
   openPrimary: document.getElementById('open-primary'),
@@ -52,14 +56,16 @@ async function openOptions() {
 }
 
 async function loadState() {
-  const [contexts, settings, tabs, stored] = await Promise.all([
+  const [contexts, binders, settings, tabs, stored] = await Promise.all([
     getContexts(),
+    getBinders(),
     getSettings(),
     chrome.tabs.query({ active: true, currentWindow: true }),
     chrome.storage.local.get([LAST_CONTEXT_KEY, SELECTED_CONTEXTS_KEY]),
   ]);
 
   state.contexts = contexts;
+  state.binders = binders;
   state.settings = settings;
   state.tab = tabs[0] || null;
   state.aiModeActive = false;
@@ -96,20 +102,41 @@ async function loadState() {
   els.fallback.checked = settings.fallbackToText !== false;
 }
 
+function renderBinderFilter() {
+  els.binderFilter.textContent = '';
+  const all = document.createElement('option');
+  all.value = '';
+  all.textContent = 'All binders';
+  els.binderFilter.appendChild(all);
+  for (const binder of state.binders) {
+    const opt = document.createElement('option');
+    opt.value = binder.id;
+    opt.textContent = binder.name;
+    if (state.binderFilter === binder.id) opt.selected = true;
+    els.binderFilter.appendChild(opt);
+  }
+}
+
 function renderList() {
   els.list.textContent = '';
 
-  if (!state.contexts.length) {
+  const filtered = state.binderFilter
+    ? state.contexts.filter((c) => c.binderId === state.binderFilter)
+    : state.contexts;
+
+  if (!filtered.length) {
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.textContent = 'No contexts yet. Add a file or paste text to get started.';
+    empty.textContent = state.contexts.length
+      ? 'No contexts in this binder.'
+      : 'No contexts yet. Add a file or paste text to get started.';
     els.list.appendChild(empty);
     els.list.style.display = 'block';
     return;
   }
   els.list.style.display = '';
 
-  for (const context of state.contexts) {
+  for (const context of filtered) {
     const option = document.createElement('button');
     option.type = 'button';
     option.className = 'option';
@@ -129,7 +156,9 @@ function renderList() {
 
     const sub = document.createElement('span');
     sub.className = 'sub';
+    const binder = state.binders.find((b) => b.id === context.binderId);
     const details = [
+      binder ? `Binder: ${binder.name}` : 'Unfiled',
       context.kind === 'text' ? 'Text' : 'File',
       formatBytes(context.size),
       formatDateTime(context.createdAt),
@@ -242,6 +271,10 @@ function wireEvents() {
     openWithContext(els.openAlt2.dataset.site || 'aimode'),
   );
   els.attachCurrent.addEventListener('click', attachToCurrentTab);
+  els.binderFilter.addEventListener('change', (event) => {
+    state.binderFilter = event.target.value || null;
+    renderList();
+  });
   els.fallback.addEventListener('change', async () => {
     state.settings = await saveSettings({ fallbackToText: els.fallback.checked });
     showStatus(
@@ -284,6 +317,7 @@ async function init() {
     showStatus(error?.message || 'Could not read saved contexts', 'error');
     return;
   }
+  renderBinderFilter();
   renderList();
   updateActions();
   configureDestinationButtons();

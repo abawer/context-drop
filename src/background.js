@@ -401,13 +401,14 @@ const handlers = {
     const contexts = await getContexts();
     return {
       ok: true,
-      contexts: contexts.map(({ id, name, kind, fileName, size, mime, createdAt }) => ({
+      contexts: contexts.map(({ id, name, kind, fileName, size, mime, createdAt, binderId }) => ({
         id,
         name,
         kind,
         fileName,
         size,
         mime,
+        binderId,
         createdAt,
       })),
     };
