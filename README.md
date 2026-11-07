@@ -91,12 +91,29 @@ See [privacy-policy.md](https://github.com/abawer/context-drop/blob/main/privacy
 
 ## Development
 
-This project is a plain Manifest V3 extension and has no package manifest or automated test command in the repository. For a manual smoke test, load the unpacked extension, add at least two contexts, select both in the popup, and open a supported destination. Also check the no-context open path, current-tab attachment, text fallback from both the popup and Settings, auto-attach, right-click chat and selected-text saving, floating-panel list refresh, text edit, file view/download, delete confirmation, and JSON export/import.
+This project is a plain Manifest V3 extension. It has no build step, but it does have an automated test suite.
+
+```bash
+npm install
+npx playwright install chromium   # first time only, used by the e2e test
+npm test                          # Jest unit tests
+npm run test:e2e                  # Playwright against the real unpacked extension
+npm run test:all                  # both
+```
+
+Unit tests run in jsdom. `tests/setup/chrome-mocks.js` provides resettable
+`chrome.*` APIs and an in-memory IndexedDB; `tests/helpers/load-content-scripts.js`
+executes the real classic content scripts without booting the page agent.
+The Playwright test launches Chromium with the unpacked extension and drives the
+Settings and popup pages, so it also covers the manifest and service worker.
+
+For a manual pass beyond the automated coverage, load the unpacked extension, add at least two contexts, select both in the popup, and open a supported destination. Also check the no-context open path, current-tab attachment, text fallback from both the popup and Settings, auto-attach, right-click chat and selected-text saving, floating-panel list refresh, text edit, file view/download, delete confirmation, and JSON export/import.
 
 ```text
 manifest.json             Extension manifest
 icons/                    Extension icons
-src/background.js          Service worker and message routing
+src/background.js         Service worker lifecycle, badges and context-menu actions
+src/background/helpers.js Pure pending/auto-attach/message helpers
 src/content/content.js     Shared attachment strategies and floating panel
 src/content/adapters/      Per-service activation, composer, and capture rules
 	registry.js              Adapter registration and host resolution
@@ -108,4 +125,7 @@ src/content/adapters/      Per-service activation, composer, and capture rules
 src/lib/store.js           Settings and local context storage
 src/popup/                 Toolbar popup
 src/options/               Settings and context library
+tests/unit/                Jest tests (store, handlers, content helpers, URLs)
+tests/e2e/                 Playwright test against the unpacked extension
+```
 ```

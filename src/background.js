@@ -10,9 +10,15 @@ import {
   setContextBinder,
   updateTextContext,
 } from './lib/store.js';
+import {
+  autoAttachTargets,
+  contextIdsFrom,
+  describeMethod,
+  isPendingExpired,
+  pendingKey,
+  siteIdFrom,
+} from './background/helpers.js';
 
-const PENDING_PREFIX = 'pending:';
-const PENDING_TTL_MS = 2 * 60 * 1000;
 const LAST_CONTEXT_KEY = 'lastContextId';
 const CONTENT_FILES = [
   'src/content/adapters/registry.js',
@@ -142,28 +148,30 @@ function showSaveFeedback(tab, result, { contextId, binders } = {}) {
  * Lifecycle
  * ------------------------------------------------------------------ */
 
-chrome.runtime.onInstalled.addListener(async (details) => {
-  await chrome.action.setBadgeBackgroundColor({ color: BADGE_BUSY_COLOR }).catch(() => {});
-  await chrome.contextMenus.removeAll();
-  chrome.contextMenus.create({
-    id: SAVE_SELECTION_MENU_ID,
-    title: 'Save selected text to Context Drop',
-    contexts: ['selection'],
-  });
-  chrome.contextMenus.create({
-    id: SAVE_CHAT_MENU_ID,
-    title: 'Save this chat to Context Drop',
-    contexts: ['page'],
-    documentUrlPatterns: CHAT_PAGE_PATTERNS,
-  });
-  if (details.reason === 'install') {
-    // Make sure the settings key exists so the options page has something to read.
-    await getSettings().catch(() => {});
-    if (chrome.runtime.openOptionsPage) {
-      chrome.runtime.openOptionsPage().catch(() => {});
+function registerLifecycleListeners() {
+  chrome.runtime.onInstalled.addListener(async (details) => {
+    await chrome.action.setBadgeBackgroundColor({ color: BADGE_BUSY_COLOR }).catch(() => {});
+    await chrome.contextMenus.removeAll();
+    chrome.contextMenus.create({
+      id: SAVE_SELECTION_MENU_ID,
+      title: 'Save selected text to Context Drop',
+      contexts: ['selection'],
+    });
+    chrome.contextMenus.create({
+      id: SAVE_CHAT_MENU_ID,
+      title: 'Save this chat to Context Drop',
+      contexts: ['page'],
+      documentUrlPatterns: CHAT_PAGE_PATTERNS,
+    });
+    if (details.reason === 'install') {
+      // Make sure the settings key exists so the options page has something to read.
+      await getSettings().catch(() => {});
+      if (chrome.runtime.openOptionsPage) {
+        chrome.runtime.openOptionsPage().catch(() => {});
+      }
     }
-  }
-});
+  });
+}
 
 async function saveChatFromTab(tab) {
   if (!tab?.id) return;
@@ -235,40 +243,37 @@ async function saveSelectedText(info, tab) {
   }
 }
 
-chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId === SAVE_SELECTION_MENU_ID) {
-    saveSelectedText(info, tab);
-  } else if (info.menuItemId === SAVE_CHAT_MENU_ID) {
-    saveChatFromTab(tab);
-  }
-});
+function registerContextMenuListeners() {
+  chrome.contextMenus.onClicked.addListener((info, tab) => {
+    if (info.menuItemId === SAVE_SELECTION_MENU_ID) {
+      saveSelectedText(info, tab);
+    } else if (info.menuItemId === SAVE_CHAT_MENU_ID) {
+      saveChatFromTab(tab);
+    }
+  });
 
-chrome.tabs.onRemoved.addListener((tabId) => {
-  chrome.storage.session.remove(PENDING_PREFIX + tabId).catch(() => {});
-});
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    chrome.storage.session.remove(pendingKey(tabId)).catch(() => {});
+  });
+}
 
 /* ------------------------------------------------------------------ *
  * Pending attach requests (survive the page reload of a fresh tab)
  * ------------------------------------------------------------------ */
 
-function contextIdsFrom(message) {
-  const contextIds = Array.isArray(message.contextIds) ? message.contextIds : [message.contextId];
-  return [...new Set(contextIds.filter((id) => typeof id === 'string' && id))];
-}
-
 async function setPending(tabId, contextIds) {
   await chrome.storage.session.set({
-    [PENDING_PREFIX + tabId]: { contextIds, createdAt: Date.now() },
+    [pendingKey(tabId)]: { contextIds, createdAt: Date.now() },
   });
 }
 
 async function takePending(tabId) {
-  const key = PENDING_PREFIX + tabId;
+  const key = pendingKey(tabId);
   const stored = await chrome.storage.session.get(key);
   const pending = stored[key];
   if (!pending) return null;
   await chrome.storage.session.remove(key);
-  if (Date.now() - pending.createdAt > PENDING_TTL_MS) return null;
+  if (isPendingExpired(pending)) return null;
   return pending;
 }
 
@@ -401,7 +406,7 @@ function startAttach(tabId, contextId) {
 const handlers = {
   async OPEN_WITH_CONTEXT(message) {
     const contextIds = contextIdsFrom(message);
-    const siteId = SITES[message.site] ? message.site : 'gemini';
+    const siteId = siteIdFrom(message);
     const url = await resolveSiteUrl(siteId);
     const tab = await chrome.tabs.create({ url, active: true });
     if (!contextIds.length) return { ok: true, tabId: tab.id };
@@ -451,13 +456,7 @@ const handlers = {
     if (autoAttach.mode === 'none') return { ok: true, payloads: [], settings };
 
     const contexts = await getContexts();
-    let targets = contexts;
-    if (autoAttach.mode === 'binders') {
-      targets = contexts.filter((c) => autoAttach.ids.includes(c.binderId));
-    } else if (autoAttach.mode === 'files') {
-      targets = contexts.filter((c) => autoAttach.ids.includes(c.id));
-    }
-    // 'all' -> all contexts
+    const targets = autoAttachTargets(contexts, autoAttach);
 
     const payloads = (await Promise.all(
       targets.map((context) => payloadFor(context.id).catch(() => null)),
@@ -480,6 +479,20 @@ const handlers = {
         createdAt,
       })),
     };
+  },
+
+  async LIST_BINDERS() {
+    return { ok: true, binders: await getBinders() };
+  },
+
+  async GET_BINDER_PAYLOADS(message) {
+    const settings = await getSettings();
+    const contexts = await getContexts();
+    const targets = contexts.filter((c) => c.binderId === message.binderId);
+    const payloads = (await Promise.all(
+      targets.map((context) => payloadFor(context.id).catch(() => null)),
+    )).filter(Boolean);
+    return { ok: true, payloads, settings };
   },
 
   async UPDATE_TEXT_CONTEXT(message) {
@@ -538,33 +551,46 @@ const handlers = {
   },
 };
 
-function describeMethod(method) {
-  switch (method) {
-    case 'file':
-    case 'input':
-      return 'the file picker';
-    case 'drop':
-      return 'drag & drop';
-    case 'text':
-      return 'text';
-    default:
-      return 'the page';
-  }
+function registerMessageRouter() {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const handler = handlers[message?.type];
+    if (!handler) {
+      sendResponse({ ok: false, error: `Unknown message: ${message?.type}` });
+      return false;
+    }
+
+    handler(message, sender)
+      .then((response) => sendResponse(response))
+      .catch((error) => {
+        console.warn('[Context Drop]', message?.type, error);
+        sendResponse({ ok: false, error: error?.message || String(error) });
+      });
+
+    return true; // keep the channel open for the async response
+  });
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  const handler = handlers[message?.type];
-  if (!handler) {
-    sendResponse({ ok: false, error: `Unknown message: ${message?.type}` });
-    return false;
-  }
+/**
+ * Register every chrome.* listener. Tests import the module with
+ * `__CONTEXT_DROP_NO_LISTENERS__` set so they can exercise handlers directly.
+ */
+export function registerListeners() {
+  registerLifecycleListeners();
+  registerContextMenuListeners();
+  registerMessageRouter();
+}
 
-  handler(message, sender)
-    .then((response) => sendResponse(response))
-    .catch((error) => {
-      console.warn('[Context Drop]', message?.type, error);
-      sendResponse({ ok: false, error: error?.message || String(error) });
-    });
+if (!globalThis.__CONTEXT_DROP_NO_LISTENERS__) {
+  registerListeners();
+}
 
-  return true; // keep the channel open for the async response
-});
+// Export the pieces that are useful for tests and future refactors.
+export {
+  handlers,
+  attachToTab,
+  saveChatFromTab,
+  saveSelectedText,
+  setPending,
+  takePending,
+  claimPending,
+};

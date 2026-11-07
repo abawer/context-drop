@@ -51,9 +51,7 @@ const els = {
   editBody: document.getElementById('edit-body'),
   binderName: document.getElementById('binder-name'),
   addBinderBtn: document.getElementById('add-binder'),
-  bindersList: document.getElementById('binders-list'),
 };
-
 let contexts = [];
 let binders = [];
 let settings = null;
@@ -288,10 +286,7 @@ function renderContexts() {
     header.className = 'binder-header';
     const title = document.createElement('h3');
     title.textContent = 'Unfiled';
-    const count = document.createElement('span');
-    count.className = 'count';
-    count.textContent = `${unfiled.length}`;
-    header.append(title, count);
+    header.append(title);
     section.append(header);
     for (const context of unfiled) {
       section.appendChild(contextCard(context));
@@ -301,21 +296,89 @@ function renderContexts() {
 
   binders.forEach((binder) => {
     const items = filed.filter((c) => c.binderId === binder.id);
-    if (!items.length) return;
     const section = document.createElement('div');
     section.className = 'binder-section';
     const header = document.createElement('div');
     header.className = 'binder-header';
     const title = document.createElement('h3');
     title.textContent = binder.name;
-    const count = document.createElement('span');
-    count.className = 'count';
-    count.textContent = `${items.length}`;
-    header.append(title, count);
+
+    const actions = document.createElement('div');
+    actions.className = 'binder-actions';
+
+    const renameBtn = document.createElement('button');
+    renameBtn.type = 'button';
+    renameBtn.className = 'btn';
+    renameBtn.textContent = 'Rename';
+    renameBtn.title = 'Rename this binder';
+    renameBtn.addEventListener('click', async () => {
+      const name = window.prompt('New binder name', binder.name);
+      if (name == null) return;
+      const trimmed = String(name || '').trim();
+      if (!trimmed || trimmed === binder.name) return;
+      try {
+        await renameBinder(binder.id, trimmed);
+        await refresh();
+        toast('Binder renamed', 'ok');
+      } catch (error) {
+        toast(error?.message || 'Could not rename binder', 'error');
+      }
+    });
+
+    const unbindBtn = document.createElement('button');
+    unbindBtn.type = 'button';
+    unbindBtn.className = 'btn';
+    unbindBtn.textContent = 'Unbind';
+    unbindBtn.title = 'Delete binder, move its contexts to Unfiled';
+    unbindBtn.addEventListener('click', async () => {
+      const n = items.length;
+      const ok = n
+        ? window.confirm(`Delete binder “${binder.name}” and move its ${n} context(s) to Unfiled?`)
+        : window.confirm(`Delete empty binder “${binder.name}”?`);
+      if (!ok) return;
+      try {
+        await removeBinder(binder.id);
+        await refresh();
+        toast('Binder deleted', 'ok');
+      } catch (error) {
+        toast(error?.message || 'Could not delete binder', 'error');
+      }
+    });
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn danger';
+    delBtn.textContent = 'Delete';
+    delBtn.title = 'Delete binder and all its contexts';
+    delBtn.addEventListener('click', async () => {
+      const n = items.length;
+      const ok = n
+        ? window.confirm(`Delete binder “${binder.name}” and permanently delete its ${n} context(s)?`)
+        : window.confirm(`Delete empty binder “${binder.name}”?`);
+      if (!ok) return;
+      try {
+        for (const c of items) {
+          await removeContext(c.id);
+        }
+        await removeBinder(binder.id);
+        await refresh();
+        toast('Binder deleted', 'ok');
+      } catch (error) {
+        toast(error?.message || 'Could not delete binder', 'error');
+      }
+    });
+
+    actions.append(renameBtn, unbindBtn, delBtn);
+    header.append(title, actions);
     section.append(header);
+
+    const listWrap = document.createElement('div');
+    listWrap.className = 'binder-list';
+    if (items.length > 3) listWrap.style.overflowY = 'auto';
     for (const context of items) {
-      section.appendChild(contextCard(context));
+      listWrap.appendChild(contextCard(context));
     }
+    section.appendChild(listWrap);
     els.contexts.appendChild(section);
   });
 }
@@ -338,7 +401,6 @@ async function refresh() {
   ]);
   renderContexts();
   renderSettings();
-  renderBinders();
   renderBinderPickers();
 }
 
@@ -347,6 +409,7 @@ async function refresh() {
  * ------------------------------------------------------------------ */
 
 function renderBinderPickers() {
+  if (!els.textBinder || !els.fileBinder) return;
   [els.textBinder, els.fileBinder].forEach((select) => {
     select.textContent = '';
     const unfiled = document.createElement('option');
@@ -362,64 +425,8 @@ function renderBinderPickers() {
   });
 }
 
-function renderBinders() {
-  els.bindersList.textContent = '';
-  if (!binders.length) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-state';
-    empty.textContent = 'No binders yet. Create one to group contexts by topic.';
-    els.bindersList.appendChild(empty);
-    return;
-  }
-  for (const binder of binders) {
-    const item = document.createElement('div');
-    item.className = 'binder-item';
-
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.value = binder.name;
-    input.maxLength = BINDER_NAME_MAX_LEN;
-    input.addEventListener('change', async () => {
-      try {
-        await renameBinder(binder.id, input.value);
-        await refresh();
-        toast('Binder renamed', 'ok');
-      } catch (error) {
-        toast(error?.message || 'Could not rename binder', 'error');
-        await refresh();
-      }
-    });
-
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'btn danger';
-    del.textContent = 'Delete';
-    del.title = 'Delete this binder';
-    del.addEventListener('click', async () => {
-      const contexts = await getContexts({ binderId: binder.id });
-      if (contexts.length) {
-        const ok = window.confirm(
-          `“${binder.name}” contains ${contexts.length} context(s). Delete the binder and move them to Unfiled?`,
-        );
-        if (!ok) return;
-      } else if (!window.confirm(`Delete binder “${binder.name}”?`)) {
-        return;
-      }
-      try {
-        await removeBinder(binder.id);
-        await refresh();
-        toast('Binder deleted', 'ok');
-      } catch (error) {
-        toast(error?.message || 'Could not delete binder', 'error');
-      }
-    });
-
-    item.append(input, del);
-    els.bindersList.appendChild(item);
-  }
-}
-
 function renderAutoAttach() {
+  if (!els.autoAttachTargets || !els.autoAttachCount) return;
   const mode = settings.autoAttach?.mode || 'none';
   const ids = new Set(settings.autoAttach?.ids || []);
   els.autoAttachTargets.textContent = '';
@@ -482,6 +489,10 @@ function renderAutoAttach() {
 }
 
 async function createBinder() {
+  if (!els.binderName) {
+    toast('Binder name input not found. Reload the extension from chrome://extensions.', 'error');
+    return;
+  }
   const name = els.binderName.value;
   if (!name.trim()) {
     els.binderName.focus();
@@ -757,28 +768,31 @@ function wireDialog() {
 }
 
 async function init() {
-  wireDropzone();
-  wireSettings();
-  wireDialog();
+  try {
+    wireDropzone();
+    wireSettings();
+    wireDialog();
 
-  els.version.textContent = `v${chrome.runtime.getManifest().version}`;
+    els.version.textContent = `v${chrome.runtime.getManifest().version}`;
 
-  els.saveText.addEventListener('click', saveTextContext);
-  els.addBinderBtn.addEventListener('click', createBinder);
-  els.exportBtn.addEventListener('click', exportData);
-  els.importBtn.addEventListener('click', () => els.importInput.click());
-  els.importInput.addEventListener('change', async () => {
-    await importData(els.importInput.files?.[0]);
-    els.importInput.value = '';
-  });
-  els.clearBtn.addEventListener('click', clearAll);
+    els.saveText.addEventListener('click', saveTextContext);
+    els.addBinderBtn.addEventListener('click', createBinder);
+    els.exportBtn.addEventListener('click', exportData);
+    els.importBtn.addEventListener('click', () => els.importInput.click());
+    els.importInput.addEventListener('change', async () => {
+      await importData(els.importInput.files?.[0]);
+      els.importInput.value = '';
+    });
+    els.clearBtn.addEventListener('click', clearAll);
 
-  await refresh();
+    await refresh();
 
-  // Warn when a text context is too exotic for the text fallback.
-  const textual = contexts.filter((c) => c.kind === 'text' || isTextualMime(c.mime));
-  if (!textual.length && contexts.length) {
-    console.info('[Context Drop] no text contexts – the fallback will not apply to binary files');
+    const textual = contexts.filter((c) => c.kind === 'text' || isTextualMime(c.mime));
+    if (!textual.length && contexts.length) {
+      console.info('[Context Drop] no text contexts – the fallback will not apply to binary files');
+    }
+  } catch (error) {
+    toast(error?.message || 'Failed to initialize settings page', 'error');
   }
 }
 

@@ -27,6 +27,8 @@
     settings: { ...DEFAULT_SETTINGS },
     busy: false,
     contexts: [],
+    binders: [],
+    selectedIds: new Set(),
     ui: null,
   };
   const pageAdapter = window.ContextDropSiteAdapters?.resolve(location);
@@ -164,7 +166,7 @@
   }
 
   function isAttachablePage() {
-    return Boolean(pageAdapter?.isActive(adapterContext()));
+    return Boolean(pageAdapter?.isActive(adapterContext())) || isGoogleSearchEntry();
   }
 
   function findComposer() {
@@ -419,7 +421,7 @@
   function countNameMentions(fileName) {
     const needle = squeeze(baseName(fileName));
     if (!needle) return 0;
-    const haystack = squeeze(document.body?.innerText || '');
+    const haystack = squeeze(document.body?.innerText || document.body?.textContent || '');
     let count = 0;
     let index = 0;
     while ((index = haystack.indexOf(needle, index)) !== -1) {
@@ -540,6 +542,9 @@
     if (needsGeminiSignIn()) {
       return { ok: false, error: 'Sign in to Gemini before attaching contexts.' };
     }
+    if (!findComposer()) {
+      return { ok: false, error: 'Could not find the chat box on this page.' };
+    }
     if (state.busy) return { ok: false, error: 'An attach is already running.' };
 
     state.busy = true;
@@ -637,160 +642,90 @@
 
     const host = document.createElement('div');
     host.id = 'context-drop-root';
-    host.style.cssText =
-      'position:fixed;z-index:2147483647;inset:auto 0 0 auto;width:0;height:0;';
+    host.style.cssText = 'position:fixed;z-index:2147483647;inset:auto 0 0 auto;width:0;height:0;';
 
     const shadow = host.attachShadow({ mode: 'open' });
     shadow.innerHTML = `
       <style>
         :host, * { box-sizing: border-box; }
-        .pill, .panel, .toast {
-          font-family: "Google Sans", Roboto, system-ui, -apple-system, "Segoe UI", sans-serif;
-          color: #1f1f1f;
-        }
-        .pill {
-          position: fixed; right: 20px; bottom: 96px;
-          display: flex; align-items: center; gap: 8px;
-          height: 40px; padding: 0 16px 0 12px;
-          border: none; border-radius: 999px;
-          background: #ffffff;
-          box-shadow: 0 1px 3px rgba(60,64,67,.3), 0 4px 12px rgba(60,64,67,.15);
-          font-size: 13px; font-weight: 500; letter-spacing: .01em;
-          cursor: pointer; user-select: none;
-          transition: box-shadow .15s ease, transform .15s ease;
-        }
+        .pill, .panel, .toast, .editor { font-family: "Google Sans", Roboto, system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f1f1f; }
+        .pill { position: fixed; right: 20px; bottom: 96px; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px 0 12px; border: none; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(60,64,67,.3), 0 4px 12px rgba(60,64,67,.15); font-size: 13px; font-weight: 500; cursor: pointer; user-select: none; }
         .pill:hover { box-shadow: 0 2px 6px rgba(60,64,67,.35), 0 8px 20px rgba(60,64,67,.18); }
-        .pill:active { transform: translateY(1px); }
-        .pill .glyph {
-          display: grid; place-items: center;
-          width: 24px; height: 24px; border-radius: 50%;
-          background: linear-gradient(135deg, #4285f4, #9b72f2);
-          color: #fff; font-size: 14px; line-height: 1; font-weight: 700;
-        }
-        .panel {
-          position: fixed; right: 20px; bottom: 148px;
-          width: 320px; max-height: 60vh;
-          display: flex; flex-direction: column;
-          background: #fff; color: #1f1f1f;
-          border-radius: 16px; overflow: hidden;
-          box-shadow: 0 8px 28px rgba(60,64,67,.28), 0 2px 6px rgba(60,64,67,.18);
-        }
-        .panel[hidden] { display: none; }
-        .panel header {
-          display: flex; align-items: center; gap: 8px;
-          padding: 14px 14px 10px 16px;
-        }
-        .panel header h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .01em; }
+        .pill .glyph { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #4285f4, #9b72f2); color: #fff; font-size: 14px; font-weight: 700; }
+        .panel { position: fixed; right: 20px; bottom: 148px; width: 340px; max-height: min(68vh, 560px); display: flex; flex-direction: column; background: #fff; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 28px rgba(60,64,67,.28), 0 2px 6px rgba(60,64,67,.18); }
+        .panel[hidden], .editor[hidden] { display: none; }
+        .panel header { display: flex; align-items: center; gap: 8px; padding: 14px 14px 8px 16px; }
+        .panel header h1 { margin: 0; font-size: 14px; font-weight: 600; }
         .panel header .spacer { flex: 1; }
-        .panel .close {
-          border: none; background: transparent; cursor: pointer;
-          width: 26px; height: 26px; border-radius: 50%; font-size: 18px; line-height: 1;
-          color: #5f6368;
-        }
+        .panel .close { border: none; background: transparent; cursor: pointer; width: 26px; height: 26px; border-radius: 50%; font-size: 18px; line-height: 1; color: #5f6368; }
         .panel .close:hover { background: rgba(60,64,67,.08); }
-        .panel .hint {
-          margin: 0; padding: 0 16px 10px; font-size: 12px; color: #5f6368; line-height: 1.45;
-        }
-        .panel .list {
-          overflow-y: auto; padding: 0 8px 8px; display: flex; flex-direction: column; gap: 4px;
-        }
-        .item {
-          display: flex; align-items: center; gap: 10px;
-          padding: 9px 10px; border-radius: 10px;
-        }
-        .item:hover { background: rgba(60,64,67,.06); }
-        .item .meta { min-width: 0; flex: 1; }
-        .item .name {
-          font-size: 13px; font-weight: 500;
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
-        .item .sub { font-size: 11px; color: #5f6368; margin-top: 1px; }
-        .item button {
-          border: 1px solid #dadce0; background: #fff; color: #1a73e8;
-          font: inherit; font-size: 12px; font-weight: 600;
-          padding: 5px 8px; border-radius: 999px; cursor: pointer;
-        }
-        .item button:hover { background: rgba(26,115,232,.08); border-color: #c6dafc; }
-        .item button[disabled] { opacity: .55; cursor: default; }
-        .editor {
-          position: fixed; z-index: 1; left: 50%; top: 50%; transform: translate(-50%, -50%);
-          width: min(560px, calc(100vw - 32px)); max-height: min(80vh, 720px);
-          display: flex; flex-direction: column; gap: 10px; padding: 16px;
-          background: #fff; color: #1f1f1f; border-radius: 12px;
-          box-shadow: 0 12px 40px rgba(0,0,0,.32);
-        }
-        .editor[hidden] { display: none; }
+        .panel .hint { margin: 0; padding: 0 16px 10px; font-size: 12px; color: #5f6368; line-height: 1.45; }
+        .toolbar { display: flex; align-items: center; gap: 8px; padding: 0 12px 10px; border-bottom: 1px solid rgba(60,64,67,.12); }
+        .attach-selected { border: none; background: #1a73e8; color: #fff; font: inherit; font-size: 12px; font-weight: 600; padding: 7px 12px; border-radius: 999px; cursor: pointer; }
+        .attach-selected:hover { filter: brightness(1.06); }
+        .attach-selected[disabled] { opacity: .55; cursor: default; }
+        .sel-count { font-size: 12px; color: #5f6368; }
+        .list { overflow-y: auto; padding: 6px 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+        .group { border: 1px solid rgba(60,64,67,.12); border-radius: 12px; overflow: hidden; }
+        .group-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #f8f9fa; }
+        .group-head label { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; cursor: pointer; }
+        .group-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .group-count { font-size: 11px; color: #5f6368; }
+        .group-body { display: flex; flex-direction: column; }
+        .row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px 8px 14px; border-top: 1px solid rgba(60,64,67,.08); }
+        .row:hover { background: rgba(60,64,67,.04); }
+        .row .meta { min-width: 0; flex: 1; }
+        .row .name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .row .sub { font-size: 11px; color: #5f6368; margin-top: 1px; }
+        .row-actions { display: flex; gap: 4px; flex: 0 0 auto; }
+        .mini { border: 1px solid #dadce0; background: #fff; color: #1a73e8; font: inherit; font-size: 11px; font-weight: 600; padding: 4px 7px; border-radius: 999px; cursor: pointer; }
+        .mini:hover { background: rgba(26,115,232,.08); }
+        .mini[disabled] { opacity: .55; cursor: default; }
+        input[type="checkbox"] { width: 15px; height: 15px; margin: 1px 0 0; accent-color: #1a73e8; flex: 0 0 auto; cursor: pointer; }
+        .empty, .group-empty { padding: 12px 14px; font-size: 12px; color: #5f6368; line-height: 1.45; }
+        .group-empty { border-top: 1px solid rgba(60,64,67,.08); }
+        .panel > footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 16px 12px; border-top: 1px solid rgba(60,64,67,.12); }
+        .panel > footer .version { font-size: 11px; color: #80868b; }
+        .link { border: none; background: transparent; color: #1a73e8; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; padding: 4px; }
+        .link:hover { text-decoration: underline; }
+        .editor { position: fixed; z-index: 1; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px)); max-height: min(80vh, 720px); display: flex; flex-direction: column; gap: 10px; padding: 16px; background: #fff; border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.32); }
         .editor h2 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
-        .editor textarea {
-          width: 100%; min-height: 240px; max-height: 55vh; resize: vertical;
-          border: 1px solid #dadce0; border-radius: 6px; padding: 10px;
-          color: inherit; background: transparent; font: 13px/1.5 ui-monospace, monospace;
-        }
+        .editor textarea { width: 100%; min-height: 240px; max-height: 55vh; resize: vertical; border: 1px solid #dadce0; border-radius: 6px; padding: 10px; color: inherit; background: transparent; font: 13px/1.5 ui-monospace, monospace; }
         .editor textarea[hidden], .editor p[hidden] { display: none; }
         .editor p { margin: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
         .editor footer { display: flex; justify-content: flex-end; gap: 8px; }
         .editor footer button { border: 1px solid #dadce0; background: transparent; color: inherit; padding: 7px 12px; border-radius: 6px; font: inherit; cursor: pointer; }
         .editor footer .save { background: #1a73e8; color: #fff; border-color: #1a73e8; }
-        .empty { padding: 12px 16px 16px; font-size: 12px; color: #5f6368; line-height: 1.5; }
-        .panel footer {
-          display: flex; align-items: center; justify-content: space-between; gap: 8px;
-          padding: 10px 16px 12px; border-top: 1px solid rgba(60,64,67,.12);
-        }
-        .panel footer .version { font-size: 11px; color: #80868b; }
-        .link {
-          border: none; background: transparent; color: #1a73e8;
-          font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; padding: 4px;
-        }
-        .link:hover { text-decoration: underline; }
-        .toast {
-          position: fixed; right: 20px; bottom: 44px; max-width: 320px;
-          padding: 10px 14px; border-radius: 10px;
-          background: #323232; color: #fff; font-size: 12.5px; line-height: 1.4;
-          box-shadow: 0 4px 14px rgba(0,0,0,.28);
-          opacity: 0; transform: translateY(6px); pointer-events: none;
-          transition: opacity .18s ease, transform .18s ease;
-        }
+        .toast { position: fixed; right: 20px; bottom: 44px; max-width: 320px; padding: 10px 14px; border-radius: 10px; background: #323232; color: #fff; font-size: 12.5px; line-height: 1.4; box-shadow: 0 4px 14px rgba(0,0,0,.28); opacity: 0; transform: translateY(6px); pointer-events: none; transition: opacity .18s ease, transform .18s ease; }
         .toast.visible { opacity: 1; transform: translateY(0); }
         .toast.success { background: #188038; }
         .toast.error { background: #c5221f; }
         @media (prefers-color-scheme: dark) {
-          .pill, .panel { background: #202124; color: #e8eaed; }
-          .panel header .close { color: #9aa0a6; }
-          .panel .hint, .item .sub, .empty, .panel footer .version { color: #9aa0a6; }
-          .item:hover { background: rgba(232,234,237,.08); }
-          .item button { background: transparent; border-color: #5f6368; color: #8ab4f8; }
-          .item button:hover { background: rgba(138,180,248,.12); }
-          .panel footer { border-top-color: rgba(232,234,237,.12); }
+          .pill, .panel, .editor { background: #202124; color: #e8eaed; }
+          .panel .close, .sel-count, .group-count, .row .sub, .empty, .group-empty, .panel > footer .version, .panel .hint { color: #9aa0a6; }
+          .group { border-color: rgba(232,234,237,.14); }
+          .group-head { background: #2a2b2e; }
+          .row, .group-empty, .toolbar, .panel > footer { border-color: rgba(232,234,237,.12); }
+          .row:hover { background: rgba(232,234,237,.06); }
+          .mini, .editor footer button { background: transparent; border-color: #5f6368; color: #8ab4f8; }
+          .mini:hover { background: rgba(138,180,248,.12); }
+          .editor textarea { border-color: #5f6368; }
           .link { color: #8ab4f8; }
-          .editor { background: #202124; color: #e8eaed; }
-          .editor textarea, .editor footer button { border-color: #5f6368; }
         }
       </style>
-      <button class="pill" type="button" title="Context Drop">
-        <span class="glyph">↓</span><span>Context</span>
-      </button>
+      <button class="pill" type="button" title="Context Drop"><span class="glyph">↓</span><span>Context</span></button>
       <section class="panel" hidden>
-        <header>
-          <h1>Context Drop</h1>
-          <span class="spacer"></span>
-          <button class="close" type="button" aria-label="Close">×</button>
-        </header>
-        <p class="hint">Attach a saved context to this conversation.</p>
+        <header><h1>Context Drop</h1><span class="spacer"></span><button class="close" type="button" aria-label="Close">×</button></header>
+        <p class="hint">Select files or whole binders, then attach them to this conversation.</p>
+        <div class="toolbar"><button class="attach-selected" type="button" disabled>Attach selected</button><span class="sel-count"></span></div>
         <div class="list"></div>
-        <footer>
-          <button class="link settings" type="button">Settings</button>
-          <span class="version"></span>
-        </footer>
+        <footer><button class="link settings" type="button">Settings</button><span class="version"></span></footer>
       </section>
       <section class="editor" role="dialog" aria-modal="true" hidden>
         <h2 class="editor-title"></h2>
         <textarea class="editor-body" aria-label="Saved context text"></textarea>
         <p class="editor-file" hidden></p>
-        <footer>
-          <button class="editor-close" type="button">Close</button>
-          <button class="editor-download" type="button" hidden>Download</button>
-          <button class="editor-save save" type="button">Save</button>
-        </footer>
+        <footer><button class="editor-close" type="button">Close</button><button class="editor-download" type="button" hidden>Download</button><button class="editor-save save" type="button">Save</button></footer>
       </section>
       <div class="toast" role="status" aria-live="polite"></div>
     `;
@@ -802,6 +737,8 @@
     const list = shadow.querySelector('.list');
     const toastEl = shadow.querySelector('.toast');
     const settingsBtn = shadow.querySelector('.settings');
+    const attachSelectedBtn = shadow.querySelector('.attach-selected');
+    const selCount = shadow.querySelector('.sel-count');
     const editor = shadow.querySelector('.editor');
     const editorTitle = shadow.querySelector('.editor-title');
     const editorBody = shadow.querySelector('.editor-body');
@@ -811,11 +748,7 @@
     let editingContext = null;
     let downloadPayload = null;
 
-    try {
-      shadow.querySelector('.version').textContent = `v${chrome.runtime.getManifest().version}`;
-    } catch {
-      /* ignore */
-    }
+    try { shadow.querySelector('.version').textContent = `v${chrome.runtime.getManifest().version}`; } catch {}
 
     let toastTimer = null;
     const toast = {
@@ -823,229 +756,228 @@
         clearTimeout(toastTimer);
         toastEl.textContent = message;
         toastEl.className = `toast visible ${kind}`;
-        if (duration > 0) {
-          toastTimer = setTimeout(() => {
-            toastEl.className = `toast ${kind}`;
-          }, duration);
-        }
+        if (duration > 0) toastTimer = setTimeout(() => { toastEl.className = `toast ${kind}`; }, duration);
       },
-      hide() {
-        clearTimeout(toastTimer);
-        toastEl.className = 'toast';
-      },
+      hide() { clearTimeout(toastTimer); toastEl.className = 'toast'; },
     };
+
+    function updateSelectionUi() {
+      const n = state.selectedIds.size;
+      attachSelectedBtn.disabled = n === 0 || state.busy;
+      selCount.textContent = n ? `${n} selected` : '';
+    }
+    function setSelected(id, on) { if (on) state.selectedIds.add(id); else state.selectedIds.delete(id); }
+    function syncGroupCheckbox(groupCb, items) {
+      const ids = items.map((c) => c.id);
+      const count = ids.filter((id) => state.selectedIds.has(id)).length;
+      groupCb.checked = ids.length > 0 && count === ids.length;
+      groupCb.indeterminate = count > 0 && count < ids.length;
+      groupCb.disabled = ids.length === 0;
+    }
+
+    async function attachContextIds(ids, sourceLabel) {
+      if (!ids.length) return;
+      attachSelectedBtn.disabled = true;
+      toast.show(`Attaching ${ids.length} item${ids.length === 1 ? '' : 's'}…`, 'info', 0);
+      let okCount = 0;
+      for (const id of ids) {
+        try {
+          const response = await chrome.runtime.sendMessage({ type: 'GET_PAYLOAD', contextId: id });
+          if (!response?.ok || !response.payload) throw new Error(response?.error || 'Could not read context');
+          const settings = { ...state.settings, ...(response.settings || {}) };
+          const result = await attachPayload(response.payload, settings);
+          await report(result);
+          if (result.ok) okCount += 1;
+        } catch (error) {
+          await report({ ok: false, error: error?.message || String(error) });
+        }
+      }
+      toast.show(
+        sourceLabel ? `Attached ${okCount}/${ids.length} from ${sourceLabel}` : `Attached ${okCount}/${ids.length} selected`,
+        okCount === ids.length ? 'success' : 'error',
+        5000,
+      );
+      updateSelectionUi();
+    }
+
+    function makeContextRow(context, groupCb, groupItems) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.title = context.fileName || context.name;
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = state.selectedIds.has(context.id);
+      cb.setAttribute('aria-label', `Select ${context.name}`);
+      cb.addEventListener('change', () => { setSelected(context.id, cb.checked); syncGroupCheckbox(groupCb, groupItems); updateSelectionUi(); });
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = context.name;
+      const sub = document.createElement('div');
+      sub.className = 'sub';
+      const savedAt = context.createdAt ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(context.createdAt) : '';
+      sub.textContent = [context.kind === 'text' ? 'Text' : 'File', formatBytes(context.size), savedAt].filter(Boolean).join(' · ');
+      meta.append(name, sub);
+
+      const rowActions = document.createElement('div');
+      rowActions.className = 'row-actions';
+
+      const viewBtn = document.createElement('button');
+      viewBtn.type = 'button';
+      viewBtn.className = 'mini';
+      viewBtn.textContent = context.kind === 'text' ? 'Edit' : 'View';
+      viewBtn.addEventListener('click', async () => {
+        viewBtn.disabled = true;
+        try {
+          const response = await chrome.runtime.sendMessage({ type: 'GET_PAYLOAD', contextId: context.id });
+          if (!response?.ok || !response.payload) throw new Error(response?.error || 'Could not read the context');
+          const payload = response.payload;
+          const isText = context.kind === 'text' || isTextual(payload.mime || '');
+          editingContext = context.kind === 'text' ? context : null;
+          downloadPayload = payload;
+          editorTitle.textContent = context.name;
+          editorBody.hidden = !isText;
+          editorBody.readOnly = context.kind !== 'text';
+          editorBody.value = isText ? new TextDecoder().decode(base64ToBytes(payload.base64)) : '';
+          editorFile.hidden = isText;
+          editorFile.textContent = isText ? '' : `${payload.fileName || context.name} · ${payload.mime || 'File'} · ${formatBytes(payload.size)}`;
+          editorSave.hidden = context.kind !== 'text';
+          editorDownload.hidden = false;
+          editor.hidden = false;
+          if (context.kind === 'text') editorBody.focus(); else editorDownload.focus();
+        } catch (error) {
+          toast.show(error?.message || 'Could not open this context', 'error', 5000);
+        } finally { viewBtn.disabled = false; }
+      });
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'mini';
+      delBtn.textContent = 'Del';
+      delBtn.title = `Delete ${context.name}`;
+      delBtn.addEventListener('click', async () => {
+        if (!window.confirm(`Delete “${context.name}”?`)) return;
+        delBtn.disabled = true;
+        try {
+          const response = await chrome.runtime.sendMessage({ type: 'DELETE_CONTEXT', contextId: context.id });
+          if (!response?.ok) throw new Error(response?.error || 'Could not delete the context');
+          state.selectedIds.delete(context.id);
+          if (editingContext?.id === context.id) { editor.hidden = true; editingContext = null; downloadPayload = null; }
+          toast.show('Context deleted', 'success');
+          await refreshContexts();
+        } catch (error) {
+          toast.show(error?.message || 'Could not delete the context', 'error', 5000);
+        } finally { delBtn.disabled = false; }
+      });
+
+      rowActions.append(viewBtn, delBtn);
+      row.append(cb, meta, rowActions);
+      return row;
+    }
+
+    function renderGroup(label, items) {
+      const group = document.createElement('section');
+      group.className = 'group';
+      const head = document.createElement('div');
+      head.className = 'group-head';
+      const headLabel = document.createElement('label');
+      const groupCb = document.createElement('input');
+      groupCb.type = 'checkbox';
+      groupCb.setAttribute('aria-label', `Select all in ${label}`);
+      groupCb.addEventListener('change', () => { for (const c of items) setSelected(c.id, groupCb.checked); renderList(); });
+      const name = document.createElement('span');
+      name.className = 'group-name';
+      name.textContent = label;
+      const count = document.createElement('span');
+      count.className = 'group-count';
+      count.textContent = `(${items.length})`;
+      headLabel.append(groupCb, name);
+      head.append(headLabel, count);
+      group.append(head);
+
+      const body = document.createElement('div');
+      body.className = 'group-body';
+      if (!items.length) {
+        const empty = document.createElement('div');
+        empty.className = 'group-empty';
+        empty.textContent = 'No files in this binder.';
+        body.appendChild(empty);
+      } else {
+        for (const context of items) body.appendChild(makeContextRow(context, groupCb, items));
+      }
+      group.append(body);
+      syncGroupCheckbox(groupCb, items);
+      return group;
+    }
 
     function renderList() {
       list.textContent = '';
-      if (!state.contexts.length) {
+      const liveIds = new Set(state.contexts.map((c) => c.id));
+      for (const id of [...state.selectedIds]) if (!liveIds.has(id)) state.selectedIds.delete(id);
+
+      if (!state.contexts.length && !(state.binders || []).length) {
         const empty = document.createElement('div');
         empty.className = 'empty';
-        empty.textContent =
-          'No contexts yet. Add a file or paste text in Settings, then come back here.';
+        empty.textContent = 'No contexts yet. Add a file or paste text in Settings, then come back here.';
         list.appendChild(empty);
+        updateSelectionUi();
         return;
       }
-      for (const context of state.contexts) {
-        const row = document.createElement('div');
-        row.className = 'item';
-        row.title = context.fileName || context.name;
 
-        const meta = document.createElement('div');
-        meta.className = 'meta';
-
-        const name = document.createElement('div');
-        name.className = 'name';
-        name.textContent = context.name;
-        name.title = context.fileName || context.name;
-
-        const sub = document.createElement('div');
-        sub.className = 'sub';
-        const savedAt = context.createdAt
-          ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(context.createdAt)
-          : '';
-        sub.textContent = [context.kind === 'text' ? 'Text' : 'File', formatBytes(context.size), savedAt]
-          .filter(Boolean)
-          .join(' · ');
-
-        meta.append(name, sub);
-
-        const viewButton = document.createElement('button');
-        viewButton.type = 'button';
-        viewButton.textContent = context.kind === 'text' ? 'Edit' : 'View';
-        viewButton.addEventListener('click', async () => {
-          viewButton.disabled = true;
-          try {
-            const response = await chrome.runtime.sendMessage({ type: 'GET_PAYLOAD', contextId: context.id });
-            if (!response?.ok || !response.payload) {
-              throw new Error(response?.error || 'Could not read the context');
-            }
-            const payload = response.payload;
-            const isText = context.kind === 'text' || isTextual(payload.mime || '');
-            editingContext = context.kind === 'text' ? context : null;
-            downloadPayload = payload;
-            editorTitle.textContent = context.name;
-            editorBody.hidden = !isText;
-            editorBody.readOnly = context.kind !== 'text';
-            editorBody.value = isText
-              ? new TextDecoder().decode(base64ToBytes(payload.base64))
-              : '';
-            editorFile.hidden = isText;
-            editorFile.textContent = isText
-              ? ''
-              : `${payload.fileName || context.name} · ${payload.mime || 'File'} · ${formatBytes(payload.size)}`;
-            editorSave.hidden = context.kind !== 'text';
-            editorDownload.hidden = false;
-            editor.hidden = false;
-            if (context.kind === 'text') editorBody.focus();
-            else editorDownload.focus();
-          } catch (error) {
-            toast.show(error?.message || 'Could not open this context', 'error', 5000);
-          } finally {
-            viewButton.disabled = false;
-          }
-        });
-
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.textContent = 'Attach';
-        button.addEventListener('click', async () => {
-          button.disabled = true;
-          button.textContent = 'Attaching…';
-          try {
-            const response = await chrome.runtime.sendMessage({
-              type: 'GET_PAYLOAD',
-              contextId: context.id,
-            });
-            if (!response?.ok || !response.payload) {
-              throw new Error(response?.error || 'Could not read the context');
-            }
-            const settings = { ...state.settings, ...(response.settings || {}) };
-            const result = await attachPayload(response.payload, settings);
-            await report(result);
-            if (result.ok) {
-              button.textContent = 'Attached';
-              setTimeout(() => {
-                button.disabled = false;
-                button.textContent = 'Attach';
-              }, 1600);
-              return;
-            }
-          } catch (error) {
-            toast.show(error?.message || 'Could not attach the context', 'error', 5000);
-          }
-          button.disabled = false;
-          button.textContent = 'Attach';
-        });
-
-        const deleteButton = document.createElement('button');
-        deleteButton.type = 'button';
-        deleteButton.textContent = 'Delete';
-        deleteButton.title = `Delete ${context.name}`;
-        deleteButton.addEventListener('click', async () => {
-          if (!window.confirm(`Delete “${context.name}”?`)) return;
-          deleteButton.disabled = true;
-          try {
-            const response = await chrome.runtime.sendMessage({
-              type: 'DELETE_CONTEXT',
-              contextId: context.id,
-            });
-            if (!response?.ok) throw new Error(response?.error || 'Could not delete the context');
-            if (editingContext?.id === context.id) {
-              editor.hidden = true;
-              editingContext = null;
-              downloadPayload = null;
-            }
-            toast.show('Context deleted', 'success');
-            await refreshContexts();
-          } catch (error) {
-            toast.show(error?.message || 'Could not delete the context', 'error', 5000);
-          } finally {
-            deleteButton.disabled = false;
-          }
-        });
-
-        row.append(meta, button, viewButton, deleteButton);
-        list.appendChild(row);
+      const unfiled = state.contexts.filter((c) => !c.binderId || !(state.binders || []).some((b) => b.id === c.binderId));
+      list.appendChild(renderGroup('Unfiled', unfiled));
+      for (const binder of state.binders || []) {
+        list.appendChild(renderGroup(binder.name, state.contexts.filter((c) => c.binderId === binder.id)));
       }
+      updateSelectionUi();
     }
 
     async function refreshContexts() {
       try {
-        const response = await chrome.runtime.sendMessage({ type: 'LIST_CONTEXTS' });
-        if (response?.ok) state.contexts = response.contexts || [];
-      } catch {
-        /* service worker asleep – keep whatever we have */
-      }
+        const [ctxRes, binderRes] = await Promise.all([
+          chrome.runtime.sendMessage({ type: 'LIST_CONTEXTS' }),
+          chrome.runtime.sendMessage({ type: 'LIST_BINDERS' }),
+        ]);
+        if (ctxRes?.ok) state.contexts = ctxRes.contexts || [];
+        if (binderRes?.ok) state.binders = binderRes.binders || [];
+      } catch {}
       renderList();
     }
 
-    function openPanel(open) {
-      panel.hidden = !open;
-      if (open) {
-        renderList();
-        refreshContexts();
-      }
-    }
+    function openPanel(open) { panel.hidden = !open; if (open) { renderList(); refreshContexts(); } }
 
+    attachSelectedBtn.addEventListener('click', async () => { await attachContextIds([...state.selectedIds], ''); });
     pill.addEventListener('click', () => openPanel(panel.hidden));
-    shadow.querySelector('.editor-close').addEventListener('click', () => {
-      editor.hidden = true;
-      editingContext = null;
-      downloadPayload = null;
-    });
+    shadow.querySelector('.close').addEventListener('click', () => openPanel(false));
+    shadow.querySelector('.editor-close').addEventListener('click', () => { editor.hidden = true; editingContext = null; downloadPayload = null; });
     editorSave.addEventListener('click', async () => {
       if (!editingContext) return;
       editorSave.disabled = true;
       try {
-        const response = await chrome.runtime.sendMessage({
-          type: 'UPDATE_TEXT_CONTEXT',
-          contextId: editingContext.id,
-          text: editorBody.value,
-        });
+        const response = await chrome.runtime.sendMessage({ type: 'UPDATE_TEXT_CONTEXT', contextId: editingContext.id, text: editorBody.value });
         if (!response?.ok) throw new Error(response?.error || 'Could not save the context');
-        editor.hidden = true;
-        toast.show('Context saved', 'success');
-        editingContext = null;
-        await refreshContexts();
-      } catch (error) {
-        toast.show(error?.message || 'Could not save the context', 'error', 5000);
-      } finally {
-        editorSave.disabled = false;
-      }
+        editor.hidden = true; toast.show('Context saved', 'success'); editingContext = null; await refreshContexts();
+      } catch (error) { toast.show(error?.message || 'Could not save the context', 'error', 5000); }
+      finally { editorSave.disabled = false; }
     });
     editorDownload.addEventListener('click', () => {
       if (!downloadPayload) return;
-      const blob = new Blob([base64ToBytes(downloadPayload.base64)], {
-        type: downloadPayload.mime || 'application/octet-stream',
-      });
+      const blob = new Blob([base64ToBytes(downloadPayload.base64)], { type: downloadPayload.mime || 'application/octet-stream' });
       const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = downloadPayload.fileName || 'context';
-      link.click();
+      const link = document.createElement('a'); link.href = url; link.download = downloadPayload.fileName || 'context'; link.click();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
     });
-    shadow.querySelector('.close').addEventListener('click', () => openPanel(false));
-    settingsBtn.addEventListener('click', () => {
-      chrome.runtime.sendMessage({ type: 'OPEN_OPTIONS' }).catch(() => {});
-    });
+    settingsBtn.addEventListener('click', () => { chrome.runtime.sendMessage({ type: 'OPEN_OPTIONS' }).catch(() => {}); });
     shadow.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
-        if (!editor.hidden) {
-          editor.hidden = true;
-          editingContext = null;
-          downloadPayload = null;
-        } else {
-          openPanel(false);
-        }
+        if (!editor.hidden) { editor.hidden = true; editingContext = null; downloadPayload = null; } else openPanel(false);
       }
     });
 
-    if (!state.settings.showFloatingButton) {
-      pill.style.display = 'none';
-      panel.style.display = 'none';
-    }
-
+    if (!state.settings.showFloatingButton) { pill.style.display = 'none'; panel.style.display = 'none'; }
     state.ui = { host, shadow, pill, panel, toast, refreshContexts, renderList, openPanel };
     return state.ui;
   }
@@ -1120,7 +1052,7 @@
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (
       areaName === 'local' &&
-      changes.contexts &&
+      (changes.contexts || changes.binders) &&
       state.ui &&
       !state.ui.panel.hidden
     ) {
@@ -1139,6 +1071,7 @@
 
   async function autoAttachContexts() {
     if (!state.settings.autoAttach?.mode || state.settings.autoAttach.mode === 'none' || !isAttachablePage()) return;
+    if (!findComposer()) return;
 
     try {
       const response = await chrome.runtime.sendMessage({ type: 'GET_AUTO_CONTEXT' });
@@ -1174,6 +1107,12 @@
 
     ui();
 
+    // On Google search/home pages the floating UI stays hidden until AI Mode
+    // is actually active (the URL may not change when AI Mode is selected).
+    if (isGoogleSearchEntry() && !isAiModeActive() && state.ui) {
+      state.ui.host.style.display = 'none';
+    }
+
     // A context can be queued by the popup before this page finished loading,
     // and the background retries a moment later – so look more than once.
     let pending = null;
@@ -1208,5 +1147,52 @@
     }
   }
 
-  bootstrap();
+  /* ---------------------------------------------------------------- *
+   * Test surface
+   *
+   * Content scripts are classic scripts, so unit tests load this file and
+   * read `window.ContextDropAgent`. Setting
+   * `window.__CONTEXT_DROP_NO_AUTOBOOT__ = true` before loading keeps the
+   * agent from touching the page until a test calls `bootstrap()` itself.
+   * ---------------------------------------------------------------- */
+
+  window.ContextDropAgent = {
+    // helpers
+    clamp,
+    isVisible,
+    areaOf,
+    baseName,
+    squeeze,
+    extensionOf,
+    base64ToBytes,
+    formatBytes,
+    isTextual,
+    // DOM / adapter lookups
+    isAiModeActive,
+    isGoogleSearchEntry,
+    isAttachablePage,
+    findComposer,
+    findFileInput,
+    findMenuButtons,
+    findDropZone,
+    composerScope,
+    countNameMentions,
+    findNameElement,
+    captureChatTranscript,
+    // attach pipeline
+    fileFromPayload,
+    textFromPayload,
+    insertIntoComposer,
+    waitForPageReady,
+    attachPayload,
+    // lifecycle
+    state,
+    adapterContext,
+    ui,
+    report,
+    refresh: () => state.ui?.refreshContexts?.(),
+    bootstrap,
+  };
+
+  if (!window.__CONTEXT_DROP_NO_AUTOBOOT__) bootstrap();
 })();

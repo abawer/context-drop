@@ -62,6 +62,14 @@
 
         </div>
 
+        <div class="card binders-create">
+          <label class="field">
+            <span>New binder</span>
+            <input id="binder-name" type="text" placeholder="e.g. Project X" maxlength="60" />
+            <button id="add-binder" class="btn primary" type="button">Create</button>
+          </label>
+        </div>
+
         <div id="contexts" class="contexts"></div>
       </section>
 
@@ -89,23 +97,6 @@
             </span>
           </label>
 
-        <div class="card settings-card">
-          <h3>Auto-attach on chat open</h3>
-          <p class="muted">
-            Choose which saved contexts are automatically attached when a supported chat page opens.
-          </p>
-          <label class="field">
-            <span>Mode</span>
-            <select id="auto-attach-mode">
-              <option value="none">Off</option>
-              <option value="all">All contexts</option>
-              <option value="binders">Specific binders</option>
-              <option value="files">Specific files</option>
-            </select>
-          </label>
-          <div id="auto-attach-targets" class="target-list"></div>
-          <p class="muted" id="auto-attach-count"></p>
-        </div>
           <label class="field">
             <span>Text prefix</span>
             <input id="text-prefix" type="text" maxlength="200" />
@@ -125,6 +116,24 @@
             <input id="timeout" type="number" min="5" max="60" step="1" />
             <small>How long to wait for the chat box to appear before giving up.</small>
           </label>
+        </div>
+
+        <div class="card settings-card">
+          <h3>Auto-attach on chat open</h3>
+          <p class="muted">
+            Choose which saved contexts are automatically attached when a supported chat page opens.
+          </p>
+          <label class="field">
+            <span>Mode</span>
+            <select id="auto-attach-mode">
+              <option value="none">Off</option>
+              <option value="all">All contexts</option>
+              <option value="binders">Specific binders</option>
+              <option value="files">Specific files</option>
+            </select>
+          </label>
+          <div id="auto-attach-targets" class="target-list"></div>
+          <p class="muted" id="auto-attach-count"></p>
         </div>
 
         <div class="card settings-card">
@@ -153,23 +162,6 @@
             Sites change often. If attaching stops working, reload the tab once so the extension
             picks up the latest page structure.
           </p>
-        </div>
-
-        <div class="card settings-card">
-          <div class="section-head">
-            <h2 id="binders-title">Binders</h2>
-          </div>
-          <p class="muted">
-            Binders group your contexts by topic. Create a binder, then file contexts under it.
-            Right-click saved chats and web text start unfiled; move them into a binder from their
-            context card below.
-          </p>
-          <label class="field">
-            <span>New binder name</span>
-            <input id="binder-name" type="text" placeholder="e.g. Project X" maxlength="60" />
-            <button id="add-binder" class="btn primary" type="button">Create</button>
-          </label>
-          <div id="binders-list" class="binders-list"></div>
         </div>
       </section>
     </main>

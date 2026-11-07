@@ -201,4 +201,13 @@
       });
     },
   });
+
+  // Test surface for the pure URL/selection helpers.
+  window.ContextDropAiModeHelpers = {
+    isSearchHost,
+    pointsToMode,
+    isAiModeLocation,
+    isGoogleHome,
+    isSearchBoxField,
+  };
 })();
