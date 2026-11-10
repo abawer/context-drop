@@ -4,7 +4,7 @@ Context Drop is a Chromium browser extension for saving files and notes locally 
 
 ## Features
 
-- Save files or pasted text in a local context library.
+- Save files or pasted text in a local context library. 
 - Select one or more contexts in the extension popup and open them in ChatGPT, Gemini, AI Mode, or AI Studio. The destination buttons also open a chat when no context is selected (or saved).
 - Attach selected contexts to a supported chat already open in the current tab.
 - Right-click a conversation on a supported page and save its transcript as a reusable text context.
